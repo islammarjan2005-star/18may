@@ -2148,34 +2148,46 @@ create_audit_workbook <- function(
         writeData(wb, ft, h[2], startRow = 3, startCol = as.integer(h[1]))
       addStyle(wb, ft, .hs(), rows = 3, cols = 4:7, gridExpand = TRUE)
 
-      uk_row <- NA_integer_
-      for (i in seq_along(ctry_rows)) {
-        src_r <- ctry_rows[i]   # row in the OECD sheets
-        out_r <- 3 + i          # Final Table row (countries from row 4)
-        nm    <- names_col[src_r]
-        vals  <- suppressWarnings(as.numeric(unlist(ft_un[src_r, 3:ncol(ft_un)])))
-        got   <- which(!is.na(vals))
-        qlab  <- if (length(got)) qhdr[2 + got[length(got)]] else ""
-        short <- if (nm %in% names(short_map)) short_map[[nm]] else nm
-        writeData(wb, ft, nm,    startRow = out_r, startCol = 1)
-        writeData(wb, ft, qlab,  startRow = out_r, startCol = 2)
-        writeData(wb, ft, short, startRow = out_r, startCol = 3)
-        .wf(wb, ft, sprintf('IFERROR(RIGHT(B%d,2)&" "&LEFT(B%d,4),"")', out_r, out_r), out_r, 4)
-        for (s in list(c(5, "Unemployment"), c(6, "Employment"), c(7, "Inactivity")))
-          .wf(wb, ft, sprintf('IFERROR(LOOKUP(9.99999999999999E+307,%s!$C$%d:$AZ$%d)/100,"")',
-                              s[2], src_r, src_r), out_r, as.integer(s[1]))
-        if (grepl("United Kingdom", nm, ignore.case = TRUE)) uk_row <- out_r
+      # latest quarter present for each OECD country
+      latest_q <- function(src_r) {
+        vals <- suppressWarnings(as.numeric(unlist(ft_un[src_r, 3:ncol(ft_un)])))
+        got  <- which(!is.na(vals))
+        if (length(got)) qhdr[2 + got[length(got)]] else ""
       }
-      last_r <- 3 + length(ctry_rows)
+      countries <- lapply(ctry_rows, function(r) list(name = names_col[r], quarter = latest_q(r)))
+      # always carry a Euro area row — blank until the OECD files include it
+      if (!any(grepl("euro area", vapply(countries, `[[`, "", "name"), ignore.case = TRUE)))
+        countries <- c(countries, list(list(name = "Euro area (20 countries)", quarter = "")))
+
+      uk_row <- euro_row <- NA_integer_
+      for (i in seq_along(countries)) {
+        ct    <- countries[[i]]
+        out_r <- 3 + i          # Final Table row (countries from row 4)
+        short <- if (ct$name %in% names(short_map)) short_map[[ct$name]] else ct$name
+        writeData(wb, ft, ct$name,    startRow = out_r, startCol = 1)
+        writeData(wb, ft, ct$quarter, startRow = out_r, startCol = 2)
+        writeData(wb, ft, short,      startRow = out_r, startCol = 3)
+        .wf(wb, ft, sprintf('IFERROR(RIGHT(B%d,2)&" "&LEFT(B%d,4),"")', out_r, out_r), out_r, 4)
+        # match the country by name in each OECD sheet; blank if it is absent
+        for (s in list(c(5, "Unemployment"), c(6, "Employment"), c(7, "Inactivity")))
+          .wf(wb, ft, sprintf(
+            'IFERROR(LOOKUP(9.99999999999999E+307,INDEX(%s!$C$9:$AZ$45,MATCH($A%d,%s!$A$9:$A$45,0),0))/100,"")',
+            s[2], out_r, s[2]), out_r, as.integer(s[1]))
+        if (grepl("united kingdom", ct$name, ignore.case = TRUE)) uk_row   <- out_r
+        if (grepl("euro area",      ct$name, ignore.case = TRUE)) euro_row <- out_r
+      }
+      last_r <- 3 + length(countries)
       addStyle(wb, ft, .pct_fmt(), rows = 4:last_r, cols = 5:7, gridExpand = TRUE, stack = TRUE)
 
-      if (!is.na(uk_row)) {
+      # UK relative to the Euro area (blank until Euro-area data is present)
+      if (!is.na(uk_row) && !is.na(euro_row)) {
         rr <- last_r + 2
-        writeData(wb, ft, "UK rank (1 = best)", startRow = rr, startCol = 4)
+        writeData(wb, ft, "UK relative to Euro area", startRow = rr, startCol = 4)
         addStyle(wb, ft, .cmp_label(), rows = rr, cols = 4, stack = TRUE)
-        .wf(wb, ft, sprintf("RANK(E%d,$E$4:$E$%d,1)", uk_row, last_r), rr, 5)
-        .wf(wb, ft, sprintf("RANK(F%d,$F$4:$F$%d,0)", uk_row, last_r), rr, 6)
-        .wf(wb, ft, sprintf("RANK(G%d,$G$4:$G$%d,1)", uk_row, last_r), rr, 7)
+        for (cc in 5:7)
+          .wf(wb, ft, sprintf('IFERROR(%s%d-%s%d,"")',
+                              .col_letter(cc), euro_row, .col_letter(cc), uk_row), rr, cc)
+        addStyle(wb, ft, .pct_fmt(), rows = rr, cols = 5:7, gridExpand = TRUE, stack = TRUE)
       }
       setColWidths(wb, ft, cols = 1:7, widths = c(26, 12, 12, 14, 24, 24, 24))
     } else {
