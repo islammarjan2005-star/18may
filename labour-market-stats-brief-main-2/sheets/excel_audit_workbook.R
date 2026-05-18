@@ -254,6 +254,7 @@ source("utils/excel_helpers.R", local = FALSE)
 .af_chgfix <- function(cl, er, r)      sprintf("%s$%d-%s$%d", cl, er, cl, r)
 .af_avg    <- function(cl, er, n = 3)  sprintf("AVERAGE(%s$%d:%s$%d)", cl, er - n + 1, cl, er)
 .af_chgavg <- function(cl, er, n, lag) sprintf("%s-%s", .af_avg(cl, er, n), .af_avg(cl, er - lag, n))
+.af_pctavg <- function(cl, er, n, lag) sprintf("IFERROR(%s/%s-1,\"\")", .af_avg(cl, er, n), .af_avg(cl, er - lag, n))
 
 
 .write_source_sheet <- function(wb, sheet_name, source_path, source_sheet,
@@ -813,7 +814,7 @@ create_audit_workbook <- function(
         for (ci in 2:min(ncol(tbl_5), 6)) {
           cl <- .col_letter(ci)
           .wf(wb, sn, .fml_last(cl, dsr), 3, ci)              # current
-          .wf(wb, sn, .fml_idx_change(cl, dsr, 3), 4, ci)    # quarterly change
+          .wf(wb, sn, .fml_idx_change(cl, dsr, 1), 4, ci)    # quarterly change (workforce jobs is quarterly data)
           .wf(wb, sn, .fml_max(cl, dsr), 5, ci)              # max
           if (!is.na(newgov_output_r))
             .wf(wb, sn, .fml_idx_change_fixed(cl, dsr, newgov_output_r), 6, ci)
@@ -1731,44 +1732,42 @@ create_audit_workbook <- function(
       writeData(wb, sn, tbl_1a, colNames = FALSE, startRow = 9)
       .restore_text(wb, sn, tbl_1a, 9)
       
-      # Detect data start row
-      off_1a <- 8
+      # Detect data rows. der_1a = last dated row, used for absolute-row
+      # formulas (region columns can have gaps that break COUNT-relative ones)
+      off_1a <- 8  # write row (9) minus 1
       dsr_1a <- .first_num_r(tbl_1a, 2) + off_1a
-      
-      # Find pre-covid range (Apr 2019 - Feb 2020)
       hr1_dates <- .detect_dates(tbl_1a[[1]])
+      hr1_valid <- which(!is.na(hr1_dates))
+      der_1a <- if (length(hr1_valid)) hr1_valid[length(hr1_valid)] + off_1a else dsr_1a
+
       .dra <- function(d) {
         idx <- which(hr1_dates == as.Date(d))
         if (length(idx)) idx[1] + off_1a else NA_integer_
       }
       precov_start <- .dra("2019-04-01")
       precov_end   <- .dra("2020-02-01")
-      
+
       # Write formulas for all region columns
       for (ci in 2:max_ci_1a) {
         cl <- .col_letter(ci)
         rng <- sprintf("%s$%d:%s$1048576", cl, dsr_1a, cl)
         arng <- sprintf("$A$%d:$A$1048576", dsr_1a)
-        
+
         # Row 2: Current (avg of last 3)
-        .wf(wb, sn, .fml_avg_last(cl, dsr_1a), 2, ci)
-        
+        .wf(wb, sn, .af_avg(cl, der_1a, 3), 2, ci)
+
         # Row 3: Average since start of 2023 (MATCH serial 44927 = Jan 1 2023)
         .wf(wb, sn, sprintf("AVERAGE(INDEX(%s,MATCH(44927,%s,0)):INDEX(%s,COUNTA(%s)))",
                             rng, arng, rng, rng), 3, ci)
-        
+
         # Row 4: Average pre-covid (fixed range)
         if (!is.na(precov_start) && !is.na(precov_end))
           .wf(wb, sn, .fml_avg_range(cl, precov_start, precov_end), 4, ci)
-        
-        # Row 5: Change on month = (avg3 / avg3_offset(-3)) - 1
-        .wf(wb, sn, .fml_pct_avg(cl, dsr_1a, -3), 5, ci)
-        
-        # Row 6: Change on quarter = (avg3 / avg3_offset(-5)) - 1
-        .wf(wb, sn, .fml_pct_avg(cl, dsr_1a, -5), 6, ci)
-        
-        # Row 7: Change on year = (avg3 / avg3_offset(-14)) - 1
-        .wf(wb, sn, .fml_pct_avg(cl, dsr_1a, -14), 7, ci)
+
+        # Rows 5-7: Change on month / quarter / year (3mo-avg ratios)
+        .wf(wb, sn, .af_pctavg(cl, der_1a, 3, 1),  5, ci)
+        .wf(wb, sn, .af_pctavg(cl, der_1a, 3, 3),  6, ci)
+        .wf(wb, sn, .af_pctavg(cl, der_1a, 3, 12), 7, ci)
       }
       
       # Formatting
