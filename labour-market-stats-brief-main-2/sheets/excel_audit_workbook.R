@@ -51,24 +51,40 @@ source("utils/excel_helpers.R", local = FALSE)
   if (length(idx) == 0) NA_integer_ else idx[1]
 }
 
-# output row of the first real data row, located by the date/period label in
-# column 1. More reliable than .first_num_r, which is fooled when ONS metadata
-# rows (publication dates, etc.) carry numeric values above the data block.
-.data_row <- function(tbl, write_row) {
-  if (nrow(tbl) == 0) return(write_row)
+# row indices in `tbl` whose column-1 label looks like a date/period,
+# tolerating trailing ONS revision markers such as " [p]" / " [r]"
+.date_label_rows <- function(tbl) {
+  if (nrow(tbl) == 0) return(integer(0))
   col1 <- tolower(trimws(as.character(tbl[[1]])))
   mon  <- "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+  fmon <- "january|february|march|april|may|june|july|august|september|october|november|december"
+  mk   <- "(\\s*\\[[a-z]\\])?$"
   pats <- c(
-    sprintf("^(%s)-(%s)\\s+\\d{4}$", mon, mon),
-    "^(january|february|march|april|may|june|july|august|september|october|november|december)\\s+\\d{4}$",
-    sprintf("^(%s)\\s+\\d{2,4}$", mon)
+    paste0("^(", mon, ")-(", mon, ")\\s+\\d{4}", mk),
+    paste0("^(", fmon, ")\\s+\\d{4}", mk),
+    paste0("^(", mon, ")\\s+\\d{2,4}", mk)
   )
   for (p in pats) {
     idx <- which(grepl(p, col1))
-    if (length(idx) > 0) return(idx[1] + write_row - 1)
+    if (length(idx) > 0) return(idx)
   }
+  integer(0)
+}
+
+# output row of the first real data row. More reliable than .first_num_r,
+# which is fooled when ONS metadata rows carry numeric values above the data.
+.data_row <- function(tbl, write_row) {
+  idx <- .date_label_rows(tbl)
+  if (length(idx) > 0) return(idx[1] + write_row - 1)
   fr <- .first_num_r(tbl, 2)
   if (!is.na(fr)) fr + write_row - 1 else write_row
+}
+
+# output row of the last real data row
+.data_end_row <- function(tbl, write_row) {
+  idx <- .date_label_rows(tbl)
+  if (length(idx) > 0) return(idx[length(idx)] + write_row - 1)
+  write_row + nrow(tbl) - 1
 }
 
 .lfs_metric <- function(tbl, col, labels) {
@@ -102,7 +118,13 @@ source("utils/excel_helpers.R", local = FALSE)
   has_num <- rowSums(!is.na(tbl[, num_cols, drop = FALSE])) > 0
   rows <- which(has_num)
   if (length(rows) == 0) return(tbl)
-  tbl[rows[1]:rows[length(rows)], , drop = FALSE]
+  kept <- rows[1]:rows[length(rows)]
+  out <- tbl[kept, , drop = FALSE]
+  # keep raw_text aligned with the trimmed rows, else .restore_text recycles
+  # the longer untrimmed vector and writes stray text past the data block
+  rt <- attr(tbl, "raw_text")
+  if (!is.null(rt)) attr(out, "raw_text") <- lapply(rt, function(col) col[kept])
+  out
 }
 
 .hs <- function() createStyle(fontName = "Arial", fontSize = 10, fontColour = "#FFFFFF",
@@ -1249,9 +1271,11 @@ create_audit_workbook <- function(
       writeData(wb, sn, tbl_18, colNames = FALSE, startRow = 10)
       .restore_text(wb, sn, tbl_18, 10)
       
-      # Detect data start row (first numeric value in col 2)
-      off_18 <- 9
-      dsr_18 <- .first_num_r(tbl_18, 2) + off_18
+      # Locate the last data row by date label. Column 2 has a real gap (the
+      # covid-era collection pause), so COUNT-relative formulas undershoot —
+      # the comparison rows below use absolute row references instead.
+      off_18 <- 9  # write row (10) minus 1, used by .dr18 baseline lookups
+      der_18 <- .data_end_row(tbl_18, off_18 + 1)
       
       # Find baseline rows dynamically from dates
       s18_dates <- .detect_dates(tbl_18[[1]])
@@ -1267,26 +1291,28 @@ create_audit_workbook <- function(
       elec18_r1 <- .dr18("2024-04-01"); elec18_r3 <- .dr18("2024-06-01")
       
       # Write formulas for cols B(2), C(3), D(4)
-      # Working days lost / stoppages / workers involved are all absolute counts — no *52
+      # Working days lost / stoppages / workers involved are absolute counts — no *52.
+      # a3() = average of the latest 3 months, by absolute row.
+      a3 <- function(cl, end) sprintf("AVERAGE(%s$%d:%s$%d)", cl, end - 2, cl, end)
       for (ci in 2:4) {
         cl <- .col_letter(ci)
-        
-        # Row 3: Current (singular month) — last value
-        .wf(wb, sn, .fml_last(cl, dsr_18), 3, ci)
-        
+
+        # Row 3: Current (singular month) — the last data row
+        .wf(wb, sn, sprintf("%s$%d", cl, der_18), 3, ci)
+
         # Row 4: Change on quarter (3mo avg vs prior 3mo avg)
-        .wf(wb, sn, .fml_change_avg(cl, dsr_18, -5), 4, ci)
-        
+        .wf(wb, sn, sprintf("%s-%s", a3(cl, der_18), a3(cl, der_18 - 3)), 4, ci)
+
         # Row 5: Change since Covid-19 (vs 2019 annual average)
         if (!is.na(r2019_start) && !is.na(r2019_end)) {
           .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                              .fml_avg_last(cl, dsr_18), cl, r2019_start, cl, r2019_end), 5, ci)
+                              a3(cl, der_18), cl, r2019_start, cl, r2019_end), 5, ci)
         }
-        
+
         # Row 6: Change since 2024 election (3mo avg)
         if (!is.na(elec18_r1) && !is.na(elec18_r3)) {
           .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                              .fml_avg_last(cl, dsr_18), cl, elec18_r1, cl, elec18_r3), 6, ci)
+                              a3(cl, der_18), cl, elec18_r1, cl, elec18_r3), 6, ci)
         }
         
         # Row 7: 2019 average
