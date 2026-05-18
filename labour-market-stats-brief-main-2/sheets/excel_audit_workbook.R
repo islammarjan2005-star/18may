@@ -902,10 +902,10 @@ create_audit_workbook <- function(
       .restore_text(wb, sn, tbl_11, 9)
       
       # Detect data start rows
-      off_11 <- 8
-      dsr_11_main <- .first_num_r(tbl_11, 2) + off_11  # Total (col B) and Inactive% (col L)
-      # Sub-category columns start data later (more header rows)
-      dsr_11_sub <- if (ncol(tbl_11) >= 3) .first_num_r(tbl_11, 3) + off_11 else dsr_11_main
+      off_11 <- 8  # write row (9) minus 1, used by .fr11 baseline lookups
+      # locate the real data row by date label; cols 2/3 carry stray metadata numbers
+      dsr_11_main <- .data_row(tbl_11, off_11 + 1)
+      dsr_11_sub  <- dsr_11_main
       
       # Find baseline rows
       .fr11 <- function(label) {
