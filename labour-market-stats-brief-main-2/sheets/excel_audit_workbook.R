@@ -2110,11 +2110,76 @@ create_audit_workbook <- function(
       }
     }
   } else {
-    # Build Final Table combining OECD data
-    if (!"Final Table" %in% names(wb)) {
-      addWorksheet(wb, "Final Table", tabColour = "#2F5496")
-      writeData(wb, "Final Table", data.frame(V1 = "See Unemployment, Employment, Inactivity sheets for OECD data."),
-                startRow = 1, colNames = FALSE)
+    # --- Final Table: OECD international comparison ---
+    if (!"Final Table" %in% names(wb)) addWorksheet(wb, "Final Table", tabColour = "#2F5496")
+    ft <- "Final Table"
+
+    ft_un <- NULL
+    if (!is.null(file_oecd_unemp) && !is.data.frame(file_oecd_unemp)) {
+      ft_sh <- .detect_sheet(file_oecd_unemp, c("Table", "Unemployment", "Sheet1", "Data"))
+      if (!is.null(ft_sh)) ft_un <- tryCatch(.safe_read(file_oecd_unemp, ft_sh), error = function(e) NULL)
+    }
+
+    if (!is.null(ft_un) && nrow(ft_un) >= 9 && ncol(ft_un) >= 3) {
+      # OECD export layout: country names in col 1, quarter headers in row 7,
+      # data from row 9. The OECD sheets are written verbatim, so these row /
+      # column positions address them directly.
+      # quarter headers: read from raw_text — .safe_read coerces these data
+      # columns to numeric, which would turn the row-7 labels into NA
+      ft_rt <- attr(ft_un, "raw_text")
+      qhdr  <- if (!is.null(ft_rt)) vapply(ft_rt, function(col) as.character(col[7]), character(1))
+               else as.character(unlist(ft_un[7, ]))
+      names_col <- trimws(as.character(ft_un[[1]]))
+      ctry_rows <- integer(0)
+      for (r in 9:nrow(ft_un)) {
+        nm <- names_col[r]
+        if (is.na(nm) || !nzchar(nm) ||
+            grepl("©|terms|copyright", nm, ignore.case = TRUE)) break
+        ctry_rows <- c(ctry_rows, r)
+      }
+      short_map <- c("United Kingdom" = "UK", "United States" = "US",
+                     "Euro area (20 countries)" = "Euro Area")
+
+      writeData(wb, ft, "OECD international comparison — infra-annual labour statistics",
+                startRow = 1, startCol = 1)
+      addStyle(wb, ft, .ts(), rows = 1, cols = 1)
+      for (h in list(c(4, "Time period"), c(5, "Unemployment rate (15+, %)"),
+                     c(6, "Employment rate (15-64, %)"), c(7, "Inactivity rate (15-64, %)")))
+        writeData(wb, ft, h[2], startRow = 3, startCol = as.integer(h[1]))
+      addStyle(wb, ft, .hs(), rows = 3, cols = 4:7, gridExpand = TRUE)
+
+      uk_row <- NA_integer_
+      for (i in seq_along(ctry_rows)) {
+        src_r <- ctry_rows[i]   # row in the OECD sheets
+        out_r <- 3 + i          # Final Table row (countries from row 4)
+        nm    <- names_col[src_r]
+        vals  <- suppressWarnings(as.numeric(unlist(ft_un[src_r, 3:ncol(ft_un)])))
+        got   <- which(!is.na(vals))
+        qlab  <- if (length(got)) qhdr[2 + got[length(got)]] else ""
+        short <- if (nm %in% names(short_map)) short_map[[nm]] else nm
+        writeData(wb, ft, nm,    startRow = out_r, startCol = 1)
+        writeData(wb, ft, qlab,  startRow = out_r, startCol = 2)
+        writeData(wb, ft, short, startRow = out_r, startCol = 3)
+        .wf(wb, ft, sprintf('IFERROR(RIGHT(B%d,2)&" "&LEFT(B%d,4),"")', out_r, out_r), out_r, 4)
+        for (s in list(c(5, "Unemployment"), c(6, "Employment"), c(7, "Inactivity")))
+          .wf(wb, ft, sprintf('IFERROR(LOOKUP(9.99999999999999E+307,%s!$C$%d:$AZ$%d)/100,"")',
+                              s[2], src_r, src_r), out_r, as.integer(s[1]))
+        if (grepl("United Kingdom", nm, ignore.case = TRUE)) uk_row <- out_r
+      }
+      last_r <- 3 + length(ctry_rows)
+      addStyle(wb, ft, .pct_fmt(), rows = 4:last_r, cols = 5:7, gridExpand = TRUE, stack = TRUE)
+
+      if (!is.na(uk_row)) {
+        rr <- last_r + 2
+        writeData(wb, ft, "UK rank (1 = best)", startRow = rr, startCol = 4)
+        addStyle(wb, ft, .cmp_label(), rows = rr, cols = 4, stack = TRUE)
+        .wf(wb, ft, sprintf("RANK(E%d,$E$4:$E$%d,1)", uk_row, last_r), rr, 5)
+        .wf(wb, ft, sprintf("RANK(F%d,$F$4:$F$%d,0)", uk_row, last_r), rr, 6)
+        .wf(wb, ft, sprintf("RANK(G%d,$G$4:$G$%d,1)", uk_row, last_r), rr, 7)
+      }
+      setColWidths(wb, ft, cols = 1:7, widths = c(26, 12, 12, 14, 24, 24, 24))
+    } else {
+      writeData(wb, ft, data.frame(Note = "OECD unemployment file could not be read."))
     }
   }
   
