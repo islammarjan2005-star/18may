@@ -578,8 +578,10 @@ create_audit_workbook <- function(
       dsr <- if (length(rtisa_date_rows) > 0) rtisa_date_rows[1] + 4 else 11  # output row
       
       covid_r <- .find_output_row(tbl_rtisa, 1, "December 2019", 5)
-      elec_r  <- .find_output_row(tbl_rtisa, 1, "July 2024", 5)
-      office_r <- elec_r  # "coming into office" = July 2024
+      # 2024 election baseline = the Apr-Jun 2024 quarter (elec_r:elec_r+2);
+      # coming-into-office baseline = the single month June 2024
+      elec_r   <- .find_output_row(tbl_rtisa, 1, "April 2024", 5)
+      office_r <- .find_output_row(tbl_rtisa, 1, "June 2024", 5)
       cl <- "$B"
       
       hdrs <- c("Current", "Change on month (singular)", "Change on quarter",
