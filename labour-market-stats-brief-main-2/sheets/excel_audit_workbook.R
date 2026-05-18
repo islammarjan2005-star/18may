@@ -2040,9 +2040,12 @@ create_audit_workbook <- function(
     list(lab = "Payrolled employees (000s)",         sh = "1. Payrolled employees (UK)",
          cells = c("B2","D2","E2","G2","H2"), rate = FALSE),
     list(lab = "Vacancies (000s)",                   sh = "20", cells = c("B2","B3","B4","B5","B6"),       rate = FALSE),
-    list(lab = "Wage growth, total pay (yearly %)",  sh = "13", cells = c("D4","D5","D6","D7","D8"),       rate = TRUE),
-    list(lab = "Wage growth, CPI-adjusted (yearly %)", sh = "AWE Real_CPI",
-         cells = c("C2","C3","C4","C5","C8"), rate = TRUE)
+    # wage rows: current = yearly % growth; the change columns are the £ change
+    # in annual earnings (sheet col B, *52), mirroring the source-of-truth design.
+    list(lab = "Wage growth in cash terms (total pay, including bonuses, yearly % change)",
+         sh = "13", cells = c("D4","B5","B6","B7","B8"), rate = TRUE, chg = "gbp"),
+    list(lab = "Wage growth adjusted for inflation (total pay, including bonuses, yearly % change)",
+         sh = "AWE Real_CPI", cells = c("C2","B3","B4","B5","B8"), rate = TRUE, chg = "gbp")
   )
 
   dash_r1 <- dash_hdr + 1
@@ -2057,7 +2060,8 @@ create_audit_workbook <- function(
     }
     if (m$rate) {
       addStyle(wb, "Dashboard", .pct_fmt(), rows = r, cols = 4, stack = TRUE)
-      addStyle(wb, "Dashboard", .pp2_fmt(), rows = r, cols = 5:8, gridExpand = TRUE, stack = TRUE)
+      chg_style <- if (isTRUE(m$chg == "gbp")) .gbp_fmt() else .pp2_fmt()
+      addStyle(wb, "Dashboard", chg_style, rows = r, cols = 5:8, gridExpand = TRUE, stack = TRUE)
     } else {
       addStyle(wb, "Dashboard", .num_fmt(), rows = r, cols = 4:8, gridExpand = TRUE, stack = TRUE)
     }
