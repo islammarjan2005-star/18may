@@ -1630,8 +1630,10 @@ create_audit_workbook <- function(
       }
     }
     
-    # Col 3: Total Pay % — Row 4 = YoY from source col E; Rows 5-8 = pct change
-    .wf(wb, sn, .fml_last("E", dsr_cpi_e), 4, 3)
+    # Col 3: Total Pay % — current YoY and its quarter/year change (source col E)
+    .wf(wb, sn, .fml_last("E", dsr_cpi_e),         2, 3)
+    .wf(wb, sn, .fml_idx_change("E", dsr_cpi_e, 3),  3, 3)
+    .wf(wb, sn, .fml_idx_change("E", dsr_cpi_e, 12), 4, 3)
     for (bl in list(
       list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
       list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
@@ -1643,8 +1645,10 @@ create_audit_workbook <- function(
                             .fml_avg_last("B", dsr_cpi_b), "B", bl$r1, "B", bl$r3), bl$r, 3)
     }
     
-    # Col 5: Regular Pay % — Row 4 = YoY from source col I; Rows 5-8 = pct change
-    .wf(wb, sn, .fml_last("I", dsr_cpi_i), 4, 5)
+    # Col 5: Regular Pay % — current YoY and its quarter/year change (source col I)
+    .wf(wb, sn, .fml_last("I", dsr_cpi_i),         2, 5)
+    .wf(wb, sn, .fml_idx_change("I", dsr_cpi_i, 3),  3, 5)
+    .wf(wb, sn, .fml_idx_change("I", dsr_cpi_i, 12), 4, 5)
     for (bl in list(
       list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
       list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
@@ -1658,7 +1662,7 @@ create_audit_workbook <- function(
     
     # Formatting
     addStyle(wb, sn, .gbp_fmt(), rows = 2:8, cols = c(2, 4), gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, .pct_fmt(), rows = 4:8, cols = c(3, 5), gridExpand = TRUE, stack = TRUE)
+    addStyle(wb, sn, .pct_fmt(), rows = 2:8, cols = c(3, 5), gridExpand = TRUE, stack = TRUE)
     addStyle(wb, sn, .cmp_sep(), rows = 8, cols = 1:9, gridExpand = TRUE, stack = TRUE)
     
     # Source data styling
@@ -1978,52 +1982,70 @@ create_audit_workbook <- function(
   setColWidths(wb, "Data links", cols = 1:2, widths = c(40, 15))
   
   # --- Dashboard ---
+  # formula-driven: every figure is a live reference into a sheet's comparison
+  # block, so the dashboard updates when the source sheets do.
   addWorksheet(wb, "Dashboard", tabColour = "#00703C")
-  writeData(wb, "Dashboard", data.frame(V1 = paste0("Labour Market Dashboard \u2014 ", ref_label)),
-            startRow = 1, colNames = FALSE)
-  addStyle(wb, "Dashboard", .ts(), rows = 1, cols = 1)
-  writeData(wb, "Dashboard", data.frame(V1 = paste0("LFS period: ", lab_cur)),
-            startRow = 2, colNames = FALSE)
-  addStyle(wb, "Dashboard", .ss(), rows = 2, cols = 1)
-  
-  hdrs <- c("Metric", "Current", "Change on quarter", "Change on year",
-            "Change since COVID-19", "Change since election")
-  writeData(wb, "Dashboard", as.data.frame(t(hdrs)), startRow = 4, colNames = FALSE)
-  addStyle(wb, "Dashboard", .hs(), rows = 4, cols = 1:6, gridExpand = TRUE)
-  
-  dash_df <- data.frame(
-    Metric = c("Employment 16+ (000s)", "Employment rate 16-64 (%)",
-               "Unemployment 16+ (000s)", "Unemployment rate 16+ (%)",
-               "Inactivity 16-64 (000s)", "Inactivity rate 16-64 (%)",
-               "Inactivity 50-64 (000s)", "Inactivity rate 50-64 (%)",
-               "Payrolled employees (000s)", "Vacancies (000s)",
-               "Wages total pay (%)", "Wages CPI-adjusted (%)"),
-    Current = c(m_emp16$cur/1000, m_emprt$cur, m_unemp16$cur/1000, m_unemprt$cur,
-                m_inact$cur/1000, m_inactrt$cur, m_5064$cur/1000, m_5064rt$cur,
-                pay_m$cur, vac_m$cur, wages_m$cur, wages_cpi_m$cur),
-    Qtr = c(m_emp16$dq/1000, m_emprt$dq, m_unemp16$dq/1000, m_unemprt$dq,
-            m_inact$dq/1000, m_inactrt$dq, m_5064$dq/1000, m_5064rt$dq,
-            pay_m$dq, vac_m$dq, wages_m$dq, wages_cpi_m$dq),
-    Yr = c(m_emp16$dy/1000, m_emprt$dy, m_unemp16$dy/1000, m_unemprt$dy,
-           m_inact$dy/1000, m_inactrt$dy, m_5064$dy/1000, m_5064rt$dy,
-           pay_m$dy, vac_m$dy, wages_m$dy, wages_cpi_m$dy),
-    COVID = c(m_emp16$dc/1000, m_emprt$dc, m_unemp16$dc/1000, m_unemprt$dc,
-              m_inact$dc/1000, m_inactrt$dc, m_5064$dc/1000, m_5064rt$dc,
-              pay_m$dc, vac_m$dc, wages_m$dc, wages_cpi_m$dc),
-    Elec = c(m_emp16$de/1000, m_emprt$de, m_unemp16$de/1000, m_unemprt$de,
-             m_inact$de/1000, m_inactrt$de, m_5064$de/1000, m_5064rt$de,
-             pay_m$de, vac_m$de, wages_m$de, wages_cpi_m$de),
-    stringsAsFactors = FALSE
+  writeData(wb, "Dashboard", paste0("Labour Market Dashboard \u2014 ", ref_label),
+            startRow = 1, startCol = 2)
+  addStyle(wb, "Dashboard", .ts(), rows = 1, cols = 2)
+  writeData(wb, "Dashboard", paste0("LFS period: ", lab_cur),
+            startRow = 2, startCol = 2)
+  addStyle(wb, "Dashboard", .ss(), rows = 2, cols = 2)
+
+  dash_hdr <- 5
+  writeData(wb, "Dashboard", "Key Metrics", startRow = dash_hdr, startCol = 2)
+  dash_cols <- c("Current", "Change on quarter", "Change on year",
+                 "Change since Covid", "Change since election")
+  for (k in seq_along(dash_cols))
+    writeData(wb, "Dashboard", dash_cols[k], startRow = dash_hdr, startCol = 3 + k)
+  addStyle(wb, "Dashboard", .hs(), rows = dash_hdr, cols = c(2, 4:8), gridExpand = TRUE)
+
+  # cells = current, change-on-quarter, -on-year, -since-covid, -since-election
+  dash_metrics <- list(
+    list(lab = "Employment (000s) 16+",              sh = "2",  cells = c("B5","B6","B7","B8","B10"),      rate = FALSE),
+    list(lab = "Employment rate (16-64)",            sh = "2",  cells = c("K5","K6","K7","K8","K10"),      rate = TRUE),
+    list(lab = "Unemployment, 16+ (000s)",           sh = "2",  cells = c("D5","D6","D7","D8","D10"),      rate = FALSE),
+    list(lab = "Unemployment rate, 16+",             sh = "2",  cells = c("E5","E6","E7","E8","E10"),      rate = TRUE),
+    list(lab = "Economic inactivity (000s) (16-64)", sh = "2",  cells = c("P5","P6","P7","P8","P10"),      rate = FALSE),
+    list(lab = "Economic inactivity rate (16-64)",   sh = "2",  cells = c("Q5","Q6","Q7","Q8","Q10"),      rate = TRUE),
+    list(lab = "50-64s inactivity (000s)",           sh = "2",  cells = c("BD5","BD6","BD7","BD8","BD10"), rate = FALSE),
+    list(lab = "50-64s inactivity rate",             sh = "2",  cells = c("BE5","BE6","BE7","BE8","BE10"), rate = TRUE),
+    list(lab = "Payrolled employees (000s)",         sh = "1. Payrolled employees (UK)",
+         cells = c("B2","D2","E2","F2","G2"), rate = FALSE),
+    list(lab = "Vacancies (000s)",                   sh = "20", cells = c("B2","B3","B4","B5","B6"),       rate = FALSE),
+    list(lab = "Wage growth, total pay (yearly %)",  sh = "13", cells = c("D4","D5","D6","D7","D8"),       rate = TRUE),
+    list(lab = "Wage growth, CPI-adjusted (yearly %)", sh = "AWE Real_CPI",
+         cells = c("C2","C3","C4","C5","C8"), rate = TRUE)
   )
-  writeData(wb, "Dashboard", dash_df, startRow = 5, colNames = FALSE)
-  
-  for (ci in 3:6) for (ri in 5:16) {
+
+  dash_r1 <- dash_hdr + 1
+  for (i in seq_along(dash_metrics)) {
+    m <- dash_metrics[[i]]
+    r <- dash_r1 + i - 1
+    writeData(wb, "Dashboard", m$lab, startRow = r, startCol = 2)
+    for (k in 1:5) {
+      f <- sprintf("'%s'!%s", m$sh, m$cells[k])
+      if (m$rate && k == 1) f <- paste0(f, "/100")  # current rate -> proportion
+      .wf(wb, "Dashboard", f, r, 3 + k)
+    }
+    if (m$rate) {
+      addStyle(wb, "Dashboard", .pct_fmt(), rows = r, cols = 4, stack = TRUE)
+      addStyle(wb, "Dashboard", .pp2_fmt(), rows = r, cols = 5:8, gridExpand = TRUE, stack = TRUE)
+    } else {
+      addStyle(wb, "Dashboard", .num_fmt(), rows = r, cols = 4:8, gridExpand = TRUE, stack = TRUE)
+    }
+  }
+  dash_rN <- dash_r1 + length(dash_metrics) - 1
+
+  for (ci in 5:8) for (ri in dash_r1:dash_rN) {
     conditionalFormatting(wb, "Dashboard", cols = ci, rows = ri,
                           type = "expression", rule = ">0", style = .pos())
     conditionalFormatting(wb, "Dashboard", cols = ci, rows = ri,
                           type = "expression", rule = "<0", style = .neg())
   }
-  setColWidths(wb, "Dashboard", cols = 1:6, widths = c(35, 15, 20, 18, 22, 22))
+  addStyle(wb, "Dashboard", .data_font(), rows = dash_r1:dash_rN, cols = 2,
+           gridExpand = TRUE, stack = TRUE)
+  setColWidths(wb, "Dashboard", cols = 2:8, widths = c(46, 3, 16, 16, 16, 18, 20))
   
   # (chart sheets removed — data sheets only)
   
