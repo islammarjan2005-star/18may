@@ -1167,14 +1167,15 @@ create_audit_workbook <- function(
       off_15 <- 9  # startRow(10) - 1, used by .dr15 baseline lookups
       der_15 <- .data_end_row(tbl_15_full, off_15 + 1)
 
-      # Find baseline rows: pandemic = Mar 2020, 2010 election = May 2010
+      # Baseline rows: pre-pandemic = Feb 2020, 2010 election = Apr 2010
+      # (the months the reference workbook compares against)
       dates_15 <- .detect_dates(tbl_15_full[[1]])
       .dr15 <- function(d) {
         idx <- which(dates_15 == as.Date(d))
         if (length(idx)) idx[1] + off_15 else NA_integer_
       }
-      pandemic_r <- .dr15("2020-03-01")
-      elec2010_r <- .dr15("2010-05-01")
+      pandemic_r <- .dr15("2020-02-01")
+      elec2010_r <- .dr15("2010-04-01")
 
       # Write formulas for all 9 sectors (comparison rows 5-9)
       for (sec in awe_sectors_15) {
