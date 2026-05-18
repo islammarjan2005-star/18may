@@ -208,17 +208,16 @@ source("utils/excel_helpers.R", local = FALSE)
                                 tab_colour = "#2F5496", start_row = 1,
                                 date_col = NULL, date_fmt_str = "MMM-YY",
                                 title = NULL) {
-  tbl <- .trim_source(.safe_read(source_path, source_sheet))
+  # write the ONS sheet verbatim — trimming header rows here offsets the
+  # output relative to the reference workbook, which keeps them
+  tbl <- .safe_read(source_path, source_sheet)
   if (nrow(tbl) == 0) return(invisible(NULL))
   
   addWorksheet(wb, sheet_name, tabColour = tab_colour)
-  
-  if (!is.null(title)) {
-    writeData(wb, sheet_name, title, startRow = 1, startCol = 1)
-    addStyle(wb, sheet_name, .ts(), rows = 1, cols = 1)
-    if (start_row < 2) start_row <- 2
-  }
-  
+
+  # the reference workbook copies ONS sheets verbatim with no inserted
+  # title row, so `title` is intentionally ignored here
+
   if (!is.null(date_col) && date_col <= ncol(tbl)) {
     tbl[[date_col]] <- .detect_dates(tbl[[date_col]])
   }
