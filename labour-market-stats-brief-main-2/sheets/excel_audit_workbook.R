@@ -51,6 +51,26 @@ source("utils/excel_helpers.R", local = FALSE)
   if (length(idx) == 0) NA_integer_ else idx[1]
 }
 
+# output row of the first real data row, located by the date/period label in
+# column 1. More reliable than .first_num_r, which is fooled when ONS metadata
+# rows (publication dates, etc.) carry numeric values above the data block.
+.data_row <- function(tbl, write_row) {
+  if (nrow(tbl) == 0) return(write_row)
+  col1 <- tolower(trimws(as.character(tbl[[1]])))
+  mon  <- "jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
+  pats <- c(
+    sprintf("^(%s)-(%s)\\s+\\d{4}$", mon, mon),
+    "^(january|february|march|april|may|june|july|august|september|october|november|december)\\s+\\d{4}$",
+    sprintf("^(%s)\\s+\\d{2,4}$", mon)
+  )
+  for (p in pats) {
+    idx <- which(grepl(p, col1))
+    if (length(idx) > 0) return(idx[1] + write_row - 1)
+  }
+  fr <- .first_num_r(tbl, 2)
+  if (!is.na(fr)) fr + write_row - 1 else write_row
+}
+
 .lfs_metric <- function(tbl, col, labels) {
   rows <- vapply(labels, function(l) .find_row(tbl, l), integer(1))
   vals <- vapply(seq_along(rows), function(i) .cell_num(tbl, rows[i], col), numeric(1))
@@ -670,7 +690,8 @@ create_audit_workbook <- function(
       addStyle(wb, sn, .hs(), rows = 2:4, cols = 2:s2_ncol, gridExpand = TRUE, stack = TRUE)
       
       # rows 5-10: comparison formulas matching feb file pattern
-      s2_dsr <- 11  # data start row in output
+      s2_dsr  <- 11                          # write row for the ONS table
+      s2_data <- .data_row(tbl_2_full, s2_dsr)  # row where real data begins
       cmp_labels <- c("Current", "Quarterly change", "Change year on year",
                       "Change since Covid (Dec 19-Feb 20)",
                       "Change since 2010 election", "Change since 2024 election")
@@ -686,12 +707,12 @@ create_audit_workbook <- function(
         for (j in 2:s2_ncol) {
           cl <- .col_letter(j)
           fml <- switch(as.character(i),
-                        "1" = .fml_last(cl, s2_dsr),
-                        "2" = .fml_idx_change(cl, s2_dsr, 3),
-                        "3" = .fml_idx_change(cl, s2_dsr, 12),
-                        "4" = if (!is.na(s2_covid_row))  .fml_idx_change_fixed(cl, s2_dsr, s2_covid_row)  else NULL,
-                        "5" = if (!is.na(s2_elec10_row)) .fml_idx_change_fixed(cl, s2_dsr, s2_elec10_row) else NULL,
-                        "6" = if (!is.na(s2_elec24_row)) .fml_idx_change_fixed(cl, s2_dsr, s2_elec24_row) else NULL
+                        "1" = .fml_last(cl, s2_data),
+                        "2" = .fml_idx_change(cl, s2_data, 3),
+                        "3" = .fml_idx_change(cl, s2_data, 12),
+                        "4" = if (!is.na(s2_covid_row))  .fml_idx_change_fixed(cl, s2_data, s2_covid_row)  else NULL,
+                        "5" = if (!is.na(s2_elec10_row)) .fml_idx_change_fixed(cl, s2_data, s2_elec10_row) else NULL,
+                        "6" = if (!is.na(s2_elec24_row)) .fml_idx_change_fixed(cl, s2_data, s2_elec24_row) else NULL
           )
           if (!is.null(fml)) .wf(wb, sn, fml, r, j)
         }
@@ -707,53 +728,6 @@ create_audit_workbook <- function(
                cols = 1:ncol(tbl_2_full), gridExpand = TRUE, stack = TRUE)
       setColWidths(wb, sn, cols = 1, widths = 32)
       freezePane(wb, sn, firstActiveRow = s2_dsr, firstActiveCol = 2)
-    }
-  }
-  
-  # --- sheet1: unemployment level + rate with comparison formulas ---
-  if (!is.null(file_a01)) {
-    tbl_s1_src <- .trim_source(.safe_read(file_a01, "2"))  # pull from A01 sheet 2
-    if (nrow(tbl_s1_src) > 0 && ncol(tbl_s1_src) >= 5) {
-      sn <- "Sheet1"
-      addWorksheet(wb, sn, tabColour = "#2F5496")
-      
-      
-      writeData(wb, sn, "Unemployment", startRow = 1, startCol = 2)
-      writeData(wb, sn, "level",        startRow = 2, startCol = 2)
-      writeData(wb, sn, "rate (%)",     startRow = 2, startCol = 3)
-      addStyle(wb, sn, .hs(), rows = 1:2, cols = 2:3, gridExpand = TRUE, stack = TRUE)
-      
-      # col 1 = date, col 5 = unemp level, col 6 = rate
-      s1_labels <- trimws(as.character(tbl_s1_src[[1]]))
-      lfs_pat_s1 <- "^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+\\d{4}$"
-      s1_data_rows <- which(grepl(lfs_pat_s1, s1_labels, ignore.case = TRUE))
-      
-      if (length(s1_data_rows) > 0) {
-        for (k in seq_along(s1_data_rows)) {
-          src_r <- s1_data_rows[k]
-          out_r <- k + 2  # data from row 3
-          writeData(wb, sn, s1_labels[src_r],                      startRow = out_r, startCol = 1)
-          lv <- suppressWarnings(as.numeric(as.character(tbl_s1_src[[5]][src_r])))
-          rt <- suppressWarnings(as.numeric(as.character(tbl_s1_src[[6]][src_r])))
-          if (!is.na(lv)) writeData(wb, sn, lv, startRow = out_r, startCol = 2)
-          if (!is.na(rt)) writeData(wb, sn, rt, startRow = out_r, startCol = 3)
-        }
-        last_data_row <- length(s1_data_rows) + 2
-        # d (level) and e (rate): lower / higher vs latest
-        for (k in seq_along(s1_data_rows)) {
-          out_r <- k + 2
-          writeFormula(wb, sn,
-                       sprintf('IF(B%d<$B$%d,"LOWER","HIGHER")', out_r, last_data_row),
-                       startRow = out_r, startCol = 4)
-          writeFormula(wb, sn,
-                       sprintf('IF(C%d<$C$%d,"LOWER","HIGHER")', out_r, last_data_row),
-                       startRow = out_r, startCol = 5)
-        }
-        addStyle(wb, sn, .num_fmt(), rows = 3:last_data_row, cols = 2, gridExpand = TRUE, stack = TRUE)
-        addStyle(wb, sn, .pp_fmt(), rows = 3:last_data_row, cols = 3, gridExpand = TRUE, stack = TRUE)
-      }
-      setColWidths(wb, sn, cols = 1, widths = 32)
-      setColWidths(wb, sn, cols = 2:5, widths = 14)
     }
   }
   
@@ -2115,7 +2089,7 @@ create_audit_workbook <- function(
   desired_order <- c(
     "How to update", "Data links", "Dashboard",
     "1. Payrolled employees (UK)", "23. Employees Industry",
-    "2", "Sheet1", "3", "5", "10", "11", "13", "15", "18", "21", "20", "22",
+    "2", "3", "5", "10", "11", "13", "15", "18", "20", "21", "22",
     "1 UK", "AWE Real_CPI",
     "Redundancies >>>", "1a", "1b", "2a", "2b",
     "Labour market flows >>>", "LFS Labour market flows SA", "RTI. Employee flows (UK)",
