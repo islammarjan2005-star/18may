@@ -245,6 +245,16 @@ source("utils/excel_helpers.R", local = FALSE)
   writeFormula(wb, sn, formula, startRow = row, startCol = col)
 }
 
+# absolute-row formula builders. `er` is the data end row (from .data_end_row).
+# Gap-immune, unlike the COUNT-relative .fml_* helpers: they address rows
+# directly, so they are unaffected by metadata rows, internal gaps, or
+# columns whose data starts late.
+.af_last   <- function(cl, er)         sprintf("%s$%d", cl, er)
+.af_change <- function(cl, er, n)      sprintf("%s$%d-%s$%d", cl, er, cl, er - n)
+.af_chgfix <- function(cl, er, r)      sprintf("%s$%d-%s$%d", cl, er, cl, r)
+.af_avg    <- function(cl, er, n = 3)  sprintf("AVERAGE(%s$%d:%s$%d)", cl, er - n + 1, cl, er)
+.af_chgavg <- function(cl, er, n, lag) sprintf("%s-%s", .af_avg(cl, er, n), .af_avg(cl, er - lag, n))
+
 
 .write_source_sheet <- function(wb, sheet_name, source_path, source_sheet,
                                 tab_colour = "#2F5496", start_row = 1,
@@ -839,12 +849,14 @@ create_audit_workbook <- function(
       
       cmp_labels_10 <- c("Current", "Quarterly change", "year on year change",
                          "Since pandemic", "Since 2010 election")
-      s10_dsr  <- 10  # write row for the ONS table
-      s10_data <- .data_row(tbl_10_full, s10_dsr)  # row where real data begins
+      s10_dsr <- 10  # write row for the ONS table
+      # absolute data end row: the redundancy columns have gaps in the early
+      # series, so COUNT-relative formulas undershoot
+      s10_der <- .data_end_row(tbl_10_full, s10_dsr)
 
       s10_covid_row  <- .find_output_row(tbl_10_full, 1, lab_covid,      s10_dsr)
       s10_elec10_row <- .find_output_row(tbl_10_full, 1, "Feb-Apr 2010", s10_dsr)
-      
+
       for (i in seq_along(cmp_labels_10)) {
         r <- 3 + i
         writeData(wb, sn, cmp_labels_10[i], startRow = r, startCol = 1)
@@ -852,11 +864,11 @@ create_audit_workbook <- function(
         for (ci in 2:min(ncol(tbl_10_full), 7)) {
           cl <- .col_letter(ci)
           fml <- switch(as.character(i),
-                        "1" = .fml_last(cl, s10_data),
-                        "2" = .fml_idx_change(cl, s10_data, 3),
-                        "3" = .fml_idx_change(cl, s10_data, 12),
-                        "4" = if (!is.na(s10_covid_row))  .fml_idx_change_fixed(cl, s10_data, s10_covid_row)  else NULL,
-                        "5" = if (!is.na(s10_elec10_row)) .fml_idx_change_fixed(cl, s10_data, s10_elec10_row) else NULL
+                        "1" = .af_last(cl, s10_der),
+                        "2" = .af_change(cl, s10_der, 3),
+                        "3" = .af_change(cl, s10_der, 12),
+                        "4" = if (!is.na(s10_covid_row))  .af_chgfix(cl, s10_der, s10_covid_row)  else NULL,
+                        "5" = if (!is.na(s10_elec10_row)) .af_chgfix(cl, s10_der, s10_elec10_row) else NULL
           )
           if (!is.null(fml)) .wf(wb, sn, fml, r, ci)
         }
@@ -923,44 +935,28 @@ create_audit_workbook <- function(
       writeData(wb, sn, tbl_11, colNames = FALSE, startRow = 9)
       .restore_text(wb, sn, tbl_11, 9)
       
-      # Detect data start rows
-      off_11 <- 8  # write row (9) minus 1, used by .fr11 baseline lookups
-      # locate the real data row by date label; cols 2/3 carry stray metadata numbers
-      dsr_11_main <- .data_row(tbl_11, off_11 + 1)
-      dsr_11_sub  <- dsr_11_main
-      
-      # Find baseline rows
+      # off_11 = write row (9) minus 1, used by .fr11 baseline lookups. The
+      # sub-category columns start their data several rows below the Total
+      # column, so address by absolute end row, not COUNT-relative.
+      off_11 <- 8
+      der_11 <- .data_end_row(tbl_11, off_11 + 1)
+
       .fr11 <- function(label) {
         idx <- .find_row(tbl_11, label)
         if (!is.na(idx)) idx + off_11 else NA_integer_
       }
       pandemic_11 <- .fr11("Dec-Feb 2020")
       elec2010_11 <- .fr11("Feb-Apr 2010")
-      
-      # Write formulas for all columns
-      # Cols B(2) and L(12) use dsr_11_main; all others use dsr_11_sub for Current row
-      # But quarterly/YoY/baseline rows ALL use dsr_11_main ($18 in reference)
+
       for (ci in 2:max_col_11) {
         cl <- .col_letter(ci)
-        is_main_col <- (ci == 2 || ci == 12)  # Total and Inactive%
-        dsr_cur <- if (is_main_col) dsr_11_main else dsr_11_sub
-        
-        # Row 3: Current
-        .wf(wb, sn, .fml_last(cl, dsr_cur), 3, ci)
-        
-        # Row 4: Quarterly change (all use dsr_11_main, offset -3)
-        .wf(wb, sn, .fml_idx_change(cl, dsr_11_main, 3), 4, ci)
-        
-        # Row 5: Year on year change (offset -12)
-        .wf(wb, sn, .fml_idx_change(cl, dsr_11_main, 12), 5, ci)
-        
-        # Row 6: Since pandemic
+        .wf(wb, sn, .af_last(cl, der_11),       3, ci)  # Current
+        .wf(wb, sn, .af_change(cl, der_11, 3),  4, ci)  # Quarterly change
+        .wf(wb, sn, .af_change(cl, der_11, 12), 5, ci)  # Year on year change
         if (!is.na(pandemic_11))
-          .wf(wb, sn, .fml_idx_change_fixed(cl, dsr_11_main, pandemic_11), 6, ci)
-        
-        # Row 7: Since 2010 election
+          .wf(wb, sn, .af_chgfix(cl, der_11, pandemic_11), 6, ci)  # Since pandemic
         if (!is.na(elec2010_11))
-          .wf(wb, sn, .fml_idx_change_fixed(cl, dsr_11_main, elec2010_11), 7, ci)
+          .wf(wb, sn, .af_chgfix(cl, der_11, elec2010_11), 7, ci)  # Since 2010 election
       }
       
       # Formatting
@@ -1024,21 +1020,20 @@ create_audit_workbook <- function(
     cmp_labels_13 <- c("Current (3mo avg)", "Change on quarter", "Change year on year",
                        "Change since Covid-19", "Change since 2024 election")
     for (i in seq_along(cmp_labels_13)) {
-      writeData(wb, sn, cmp_labels_13[i], startRow = 4 + i, startCol = 1)
-      addStyle(wb, sn, .cmp_label(), rows = 4 + i, cols = 1, stack = TRUE)
+      writeData(wb, sn, cmp_labels_13[i], startRow = 3 + i, startCol = 1)
+      addStyle(wb, sn, .cmp_label(), rows = 3 + i, cols = 1, stack = TRUE)
     }
-    
+
     # Write source data at row 10
     tbl_13[[1]] <- .detect_dates(tbl_13[[1]])
     writeData(wb, sn, tbl_13, colNames = FALSE, startRow = 10)
     .restore_text(wb, sn, tbl_13, 10)
-    
-    # Detect data start rows for each column type
-    off_13 <- 9  # startRow(10) - 1
-    dsr_w <- .first_num_r(tbl_13, 2) + off_13  # weekly £ data start row
-    dsr_s <- .first_num_r(tbl_13, 3) + off_13  # single month % data start row
-    dsr_3 <- .first_num_r(tbl_13, 4) + off_13  # 3mo avg % data start row
-    
+
+    # absolute data end row — the % columns start late (they need 12 months of
+    # history), so COUNT-relative formulas misfire
+    off_13 <- 9  # startRow(10) - 1, used by .dr13 baseline lookups
+    der_13 <- .data_end_row(tbl_13, off_13 + 1)
+
     # Find baseline rows dynamically from dates
     dates_13 <- .detect_dates(tbl_13[[1]])
     .dr13 <- function(d) {
@@ -1047,46 +1042,46 @@ create_audit_workbook <- function(
     }
     covid_r1 <- .dr13("2019-12-01"); covid_r3 <- .dr13("2020-02-01")
     elec_r1  <- .dr13("2024-04-01"); elec_r3  <- .dr13("2024-06-01")
-    
-    # Write formulas for all 9 sectors
+
+    # Write formulas for all 9 sectors (comparison rows 4-8)
     for (sec in awe_sectors) {
       cw <- .col_letter(sec$sc)      # weekly £ col letter
       cs <- .col_letter(sec$sc + 1)  # single month % col letter
       c3 <- .col_letter(sec$sc + 2)  # 3mo avg % col letter
-      
-      # Row 4: Current — 3mo avg for weekly, last value for %
-      .wf(wb, sn, .fml_avg_last(cw, dsr_w), 4, sec$sc)
-      .wf(wb, sn, .fml_last(cs, dsr_s), 4, sec$sc + 1)
-      .wf(wb, sn, .fml_last(c3, dsr_3), 4, sec$sc + 2)
-      
-      # Row 5: Change on quarter — weekly (avg3-avg3_offset)*52, % = last-last_3ago
-      .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cw, dsr_w, -5)), 5, sec$sc)
-      .wf(wb, sn, .fml_idx_change(cs, dsr_s, 3), 5, sec$sc + 1)
-      .wf(wb, sn, .fml_idx_change(c3, dsr_3, 3), 5, sec$sc + 2)
-      
-      # Row 6: Change year on year — weekly (avg3-avg3_offset-14)*52, % = last-last_12ago
-      .wf(wb, sn, sprintf("(%s)*52", .fml_change_avg(cw, dsr_w, -14)), 6, sec$sc)
-      .wf(wb, sn, .fml_idx_change(cs, dsr_s, 12), 6, sec$sc + 1)
-      .wf(wb, sn, .fml_idx_change(c3, dsr_3, 12), 6, sec$sc + 2)
-      
-      # Row 7: Change since Covid-19 — each sector uses its own column for baseline
+
+      # Row 4: Current — 3mo avg for weekly £, latest value for %
+      .wf(wb, sn, .af_avg(cw, der_13, 3), 4, sec$sc)
+      .wf(wb, sn, .af_last(cs, der_13),   4, sec$sc + 1)
+      .wf(wb, sn, .af_last(c3, der_13),   4, sec$sc + 2)
+
+      # Row 5: Change on quarter
+      .wf(wb, sn, sprintf("(%s)*52", .af_chgavg(cw, der_13, 3, 3)), 5, sec$sc)
+      .wf(wb, sn, .af_change(cs, der_13, 3), 5, sec$sc + 1)
+      .wf(wb, sn, .af_change(c3, der_13, 3), 5, sec$sc + 2)
+
+      # Row 6: Change year on year
+      .wf(wb, sn, sprintf("(%s)*52", .af_chgavg(cw, der_13, 3, 12)), 6, sec$sc)
+      .wf(wb, sn, .af_change(cs, der_13, 12), 6, sec$sc + 1)
+      .wf(wb, sn, .af_change(c3, der_13, 12), 6, sec$sc + 2)
+
+      # Row 7: Change since Covid-19 (vs the 2019-12..2020-02 window)
       if (!is.na(covid_r1) && !is.na(covid_r3)) {
         .wf(wb, sn, sprintf("(%s-AVERAGE(%s$%d:%s$%d))*52",
-                            .fml_avg_last(cw, dsr_w), cw, covid_r1, cw, covid_r3), 7, sec$sc)
+                            .af_avg(cw, der_13, 3), cw, covid_r1, cw, covid_r3), 7, sec$sc)
         .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                            .fml_last(cs, dsr_s), cs, covid_r1, cs, covid_r3), 7, sec$sc + 1)
+                            .af_last(cs, der_13), cs, covid_r1, cs, covid_r3), 7, sec$sc + 1)
         .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                            .fml_last(c3, dsr_3), c3, covid_r1, c3, covid_r3), 7, sec$sc + 2)
+                            .af_last(c3, der_13), c3, covid_r1, c3, covid_r3), 7, sec$sc + 2)
       }
-      
-      # Row 8: Change since 2024 election — each sector uses its own column for baseline
+
+      # Row 8: Change since 2024 election
       if (!is.na(elec_r1) && !is.na(elec_r3)) {
         .wf(wb, sn, sprintf("(%s-AVERAGE(%s$%d:%s$%d))*52",
-                            .fml_avg_last(cw, dsr_w), cw, elec_r1, cw, elec_r3), 8, sec$sc)
+                            .af_avg(cw, der_13, 3), cw, elec_r1, cw, elec_r3), 8, sec$sc)
         .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                            .fml_last(cs, dsr_s), cs, elec_r1, cs, elec_r3), 8, sec$sc + 1)
+                            .af_last(cs, der_13), cs, elec_r1, cs, elec_r3), 8, sec$sc + 1)
         .wf(wb, sn, sprintf("%s-AVERAGE(%s$%d:%s$%d)",
-                            .fml_last(c3, dsr_3), c3, elec_r1, c3, elec_r3), 8, sec$sc + 2)
+                            .af_last(c3, der_13), c3, elec_r1, c3, elec_r3), 8, sec$sc + 2)
       }
     }
     
@@ -1167,12 +1162,11 @@ create_audit_workbook <- function(
       writeData(wb, sn, tbl_15_full, colNames = FALSE, startRow = 10)
       .restore_text(wb, sn, tbl_15_full, 10)
       
-      # Detect data start rows
-      off_15 <- 9
-      dsr_15_w <- .first_num_r(tbl_15_full, 2) + off_15  # weekly £
-      dsr_15_s <- .first_num_r(tbl_15_full, 3) + off_15  # single month %
-      dsr_15_3 <- .first_num_r(tbl_15_full, 4) + off_15  # 3mo avg %
-      
+      # absolute data end row — the % columns start late, so COUNT-relative
+      # formulas misfire
+      off_15 <- 9  # startRow(10) - 1, used by .dr15 baseline lookups
+      der_15 <- .data_end_row(tbl_15_full, off_15 + 1)
+
       # Find baseline rows: pandemic = Mar 2020, 2010 election = May 2010
       dates_15 <- .detect_dates(tbl_15_full[[1]])
       .dr15 <- function(d) {
@@ -1181,40 +1175,40 @@ create_audit_workbook <- function(
       }
       pandemic_r <- .dr15("2020-03-01")
       elec2010_r <- .dr15("2010-05-01")
-      
-      # Write formulas for all 9 sectors
+
+      # Write formulas for all 9 sectors (comparison rows 5-9)
       for (sec in awe_sectors_15) {
         cw <- .col_letter(sec$sc)
         cs <- .col_letter(sec$sc + 1)
         c3 <- .col_letter(sec$sc + 2)
-        
+
         # Row 5: Current
-        .wf(wb, sn, .fml_last(cw, dsr_15_w), 5, sec$sc)
-        .wf(wb, sn, .fml_last(cs, dsr_15_s), 5, sec$sc + 1)
-        .wf(wb, sn, .fml_last(c3, dsr_15_3), 5, sec$sc + 2)
-        
+        .wf(wb, sn, .af_last(cw, der_15), 5, sec$sc)
+        .wf(wb, sn, .af_last(cs, der_15), 5, sec$sc + 1)
+        .wf(wb, sn, .af_last(c3, der_15), 5, sec$sc + 2)
+
         # Row 6: Quarterly change
-        .wf(wb, sn, .fml_idx_change(cw, dsr_15_w, 3), 6, sec$sc)
-        .wf(wb, sn, .fml_idx_change(cs, dsr_15_s, 3), 6, sec$sc + 1)
-        .wf(wb, sn, .fml_idx_change(c3, dsr_15_3, 3), 6, sec$sc + 2)
-        
+        .wf(wb, sn, .af_change(cw, der_15, 3), 6, sec$sc)
+        .wf(wb, sn, .af_change(cs, der_15, 3), 6, sec$sc + 1)
+        .wf(wb, sn, .af_change(c3, der_15, 3), 6, sec$sc + 2)
+
         # Row 7: Year on year change
-        .wf(wb, sn, .fml_idx_change(cw, dsr_15_w, 12), 7, sec$sc)
-        .wf(wb, sn, .fml_idx_change(cs, dsr_15_s, 12), 7, sec$sc + 1)
-        .wf(wb, sn, .fml_idx_change(c3, dsr_15_3, 12), 7, sec$sc + 2)
-        
+        .wf(wb, sn, .af_change(cw, der_15, 12), 7, sec$sc)
+        .wf(wb, sn, .af_change(cs, der_15, 12), 7, sec$sc + 1)
+        .wf(wb, sn, .af_change(c3, der_15, 12), 7, sec$sc + 2)
+
         # Row 8: Since pandemic
         if (!is.na(pandemic_r)) {
-          .wf(wb, sn, .fml_idx_change_fixed(cw, dsr_15_w, pandemic_r), 8, sec$sc)
-          .wf(wb, sn, .fml_idx_change_fixed(cs, dsr_15_s, pandemic_r), 8, sec$sc + 1)
-          .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(c3, dsr_15_s), c3, pandemic_r), 8, sec$sc + 2)
+          .wf(wb, sn, .af_chgfix(cw, der_15, pandemic_r), 8, sec$sc)
+          .wf(wb, sn, .af_chgfix(cs, der_15, pandemic_r), 8, sec$sc + 1)
+          .wf(wb, sn, .af_chgfix(c3, der_15, pandemic_r), 8, sec$sc + 2)
         }
-        
+
         # Row 9: Since 2010 election
         if (!is.na(elec2010_r)) {
-          .wf(wb, sn, .fml_idx_change_fixed(cw, dsr_15_w, elec2010_r), 9, sec$sc)
-          .wf(wb, sn, .fml_idx_change_fixed(cs, dsr_15_s, elec2010_r), 9, sec$sc + 1)
-          .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(c3, dsr_15_s), c3, elec2010_r), 9, sec$sc + 2)
+          .wf(wb, sn, .af_chgfix(cw, der_15, elec2010_r), 9, sec$sc)
+          .wf(wb, sn, .af_chgfix(cs, der_15, elec2010_r), 9, sec$sc + 1)
+          .wf(wb, sn, .af_chgfix(c3, der_15, elec2010_r), 9, sec$sc + 2)
         }
       }
       
@@ -1394,36 +1388,37 @@ create_audit_workbook <- function(
       # Source data columns: C(3)=Vacancies, D(4)=Unemployment, E(5)=Ratio
       cl_c <- "C"; cl_d <- "D"; cl_e <- "E"
       
-      # LEFT SIDE: absolute value formulas (written to cols B=2, C=3, D=4)
-      # Note: Unemployment (D) and Ratio (E) use COUNTA()-1 (one period lag)
-      
+      # LEFT SIDE: absolute value formulas (written to cols B=2, C=3, D=4).
+      # Unemployment (D) / Ratio (E): the latest period is often blank ("..");
+      # COUNT already skips it, so no extra lag offset is needed.
+
       # Row 2: Current
-      .wf(wb, sn, .fml_last(cl_c, dsr_20), 2, 2)           # Vacancies
-      .wf(wb, sn, .fml_last(cl_d, dsr_20, -1), 2, 3)       # Unemployment (lagged)
-      .wf(wb, sn, .fml_last(cl_e, dsr_20, -1), 2, 4)       # Ratio (lagged)
-      
+      .wf(wb, sn, .fml_last(cl_c, dsr_20), 2, 2)  # Vacancies
+      .wf(wb, sn, .fml_last(cl_d, dsr_20), 2, 3)  # Unemployment
+      .wf(wb, sn, .fml_last(cl_e, dsr_20), 2, 4)  # Ratio
+
       # Row 3: Quarterly change
       .wf(wb, sn, .fml_idx_change(cl_c, dsr_20, 3), 3, 2)
-      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_d, dsr_20, -1), .fml_last(cl_d, dsr_20, -4)), 3, 3)
-      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_e, dsr_20, -1), .fml_last(cl_e, dsr_20, -4)), 3, 4)
-      
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_d, dsr_20), .fml_last(cl_d, dsr_20, -3)), 3, 3)
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_e, dsr_20), .fml_last(cl_e, dsr_20, -3)), 3, 4)
+
       # Row 4: Year on year change
       .wf(wb, sn, .fml_idx_change(cl_c, dsr_20, 12), 4, 2)
-      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_d, dsr_20, -1), .fml_last(cl_d, dsr_20, -13)), 4, 3)
-      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_e, dsr_20, -1), .fml_last(cl_e, dsr_20, -13)), 4, 4)
-      
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_d, dsr_20), .fml_last(cl_d, dsr_20, -12)), 4, 3)
+      .wf(wb, sn, sprintf("%s-%s", .fml_last(cl_e, dsr_20), .fml_last(cl_e, dsr_20, -12)), 4, 4)
+
       # Row 5: Pre-pandemic trend
       if (!is.na(prepandemic_r)) {
         .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_c, dsr_20), cl_c, prepandemic_r), 5, 2)
-        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_d, dsr_20, -1), cl_d, prepandemic_r), 5, 3)
-        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_e, dsr_20, -1), cl_e, prepandemic_r), 5, 4)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_d, dsr_20), cl_d, prepandemic_r), 5, 3)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_e, dsr_20), cl_e, prepandemic_r), 5, 4)
       }
-      
+
       # Row 6: Since 2024 election
       if (!is.na(elec2024_r)) {
         .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_c, dsr_20), cl_c, elec2024_r), 6, 2)
-        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_d, dsr_20, -1), cl_d, elec2024_r), 6, 3)
-        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_e, dsr_20, -1), cl_e, elec2024_r), 6, 4)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_d, dsr_20), cl_d, elec2024_r), 6, 3)
+        .wf(wb, sn, sprintf("%s-%s$%d", .fml_last(cl_e, dsr_20), cl_e, elec2024_r), 6, 4)
       }
       
       # RIGHT SIDE: percentage change formulas (written to cols G=7, H=8, I=9)
@@ -1435,13 +1430,13 @@ create_audit_workbook <- function(
       
       # Row 3: Quarterly % change
       .wf(wb, sn, sprintf("IFERROR(B3/%s,\"\")", .fml_last(cl_c, dsr_20, -1)), 3, 7)
-      .wf(wb, sn, sprintf("IFERROR(C3/%s,\"\")", .fml_last(cl_d, dsr_20, -2)), 3, 8)
-      .wf(wb, sn, sprintf("IFERROR(D3/%s,\"\")", .fml_last(cl_e, dsr_20, -2)), 3, 9)
+      .wf(wb, sn, sprintf("IFERROR(C3/%s,\"\")", .fml_last(cl_d, dsr_20, -1)), 3, 8)
+      .wf(wb, sn, sprintf("IFERROR(D3/%s,\"\")", .fml_last(cl_e, dsr_20, -1)), 3, 9)
       
       # Row 4: Year on year % change
       .wf(wb, sn, sprintf("IFERROR(B4/%s,\"\")", .fml_last(cl_c, dsr_20, -12)), 4, 7)
-      .wf(wb, sn, sprintf("IFERROR(C4/%s,\"\")", .fml_last(cl_d, dsr_20, -13)), 4, 8)
-      .wf(wb, sn, sprintf("IFERROR(D4/%s,\"\")", .fml_last(cl_e, dsr_20, -13)), 4, 9)
+      .wf(wb, sn, sprintf("IFERROR(C4/%s,\"\")", .fml_last(cl_d, dsr_20, -12)), 4, 8)
+      .wf(wb, sn, sprintf("IFERROR(D4/%s,\"\")", .fml_last(cl_e, dsr_20, -12)), 4, 9)
       
       # Row 5: Pre-pandemic % change
       if (!is.na(prepandemic_r)) {
