@@ -583,40 +583,42 @@ create_audit_workbook <- function(
       cl <- "$B"
       
       hdrs <- c("Current", "Change on month (singular)", "Change on quarter",
-                "Change year on year", "Change since Covid-19",
-                "Change since 2024 election", "Change since coming into office",
-                "Change since start of the year", "Max")
+                "Change year on year (3 month average)", "Change year on year (singular)",
+                "Change since Covid-19", "Change since 2024 election",
+                "Change since coming into office", "Change since start of the year", "Max")
       for (ci in seq_along(hdrs)) {
         writeData(wb, sn, hdrs[ci], startRow = 1, startCol = ci + 1)
         addStyle(wb, sn, .hs(), rows = 1, cols = ci + 1, stack = TRUE)
       }
-      
+
       # row 2: number formulas, row 3: % formulas
       writeData(wb, sn, "Number", startRow = 2, startCol = 1)
       addStyle(wb, sn, .cmp_label(), rows = 2, cols = 1, stack = TRUE)
       .wf(wb, sn, .fml_avg_last(cl, dsr), 2, 2)                                    # Current
       .wf(wb, sn, sprintf("%s-%s", .fml_last(cl, dsr), .fml_last(cl, dsr, -1)), 2, 3) # Month change
       .wf(wb, sn, .fml_change_avg(cl, dsr, -5), 2, 4)                               # Quarter change
-      .wf(wb, sn, .fml_change_avg(cl, dsr, -14), 2, 5)                              # YoY change
-      if (!is.na(covid_r)) .wf(wb, sn, .fml_change_fixed(cl, dsr, covid_r, covid_r + 2), 2, 6) # Covid
-      if (!is.na(elec_r)) .wf(wb, sn, .fml_change_fixed(cl, dsr, elec_r, elec_r + 2), 2, 7)   # 2024 election
-      if (!is.na(office_r)) .wf(wb, sn, .fml_change_single(cl, dsr, office_r), 2, 8)           # Coming into office
-      .wf(wb, sn, sprintf('%s-_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)', .fml_last("B", dsr), dsr, dsr), 2, 9)
-      .wf(wb, sn, .fml_max(cl, dsr), 2, 10)                                          # Max
-      
+      .wf(wb, sn, .fml_change_avg(cl, dsr, -14), 2, 5)                              # YoY change (3 month average)
+      .wf(wb, sn, .fml_idx_change(cl, dsr, 12), 2, 6)                               # YoY change (singular month)
+      if (!is.na(covid_r)) .wf(wb, sn, .fml_change_fixed(cl, dsr, covid_r, covid_r + 2), 2, 7) # Covid
+      if (!is.na(elec_r)) .wf(wb, sn, .fml_change_fixed(cl, dsr, elec_r, elec_r + 2), 2, 8)   # 2024 election
+      if (!is.na(office_r)) .wf(wb, sn, .fml_change_single(cl, dsr, office_r), 2, 9)           # Coming into office
+      .wf(wb, sn, sprintf('%s-_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)', .fml_last("B", dsr), dsr, dsr), 2, 10)
+      .wf(wb, sn, .fml_max(cl, dsr), 2, 11)                                          # Max
+
       writeData(wb, sn, "%", startRow = 3, startCol = 1)
       addStyle(wb, sn, .cmp_label(), rows = 3, cols = 1, stack = TRUE)
       .wf(wb, sn, sprintf("IFERROR(%s/%s-1,\"\")", .fml_last(cl, dsr), .fml_last(cl, dsr, -1)), 3, 3) # Month %
       .wf(wb, sn, .fml_pct_avg(cl, dsr, -5), 3, 4)                                      # Quarter %
-      .wf(wb, sn, .fml_pct_avg(cl, dsr, -14), 3, 5)                                     # YoY %
-      if (!is.na(covid_r)) .wf(wb, sn, sprintf("IFERROR(%s/AVERAGE(%s$%d:%s$%d)-1,\"\")", .fml_last(cl, dsr), cl, covid_r, cl, covid_r + 2), 3, 6)
-      if (!is.na(elec_r)) .wf(wb, sn, .fml_pct_fixed(cl, dsr, elec_r, elec_r + 2), 3, 7)
-      if (!is.na(office_r)) .wf(wb, sn, sprintf("IFERROR(%s/%s$%d-1,\"\")", .fml_last(cl, dsr), cl, office_r), 3, 8)
-      .wf(wb, sn, sprintf('IFERROR(%s/_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)-1,"")', .fml_last("B", dsr), dsr, dsr), 3, 9)
-      
-      addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:10, gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 3:9, gridExpand = TRUE, stack = TRUE)
-      addStyle(wb, sn, .cmp_sep(), rows = 3, cols = 1:10, gridExpand = TRUE, stack = TRUE)
+      .wf(wb, sn, .fml_pct_avg(cl, dsr, -14), 3, 5)                                     # YoY % (3 month average)
+      .wf(wb, sn, sprintf("IFERROR(%s/%s-1,\"\")", .fml_last(cl, dsr), .fml_last(cl, dsr, -12)), 3, 6) # YoY % (singular)
+      if (!is.na(covid_r)) .wf(wb, sn, sprintf("IFERROR(%s/AVERAGE(%s$%d:%s$%d)-1,\"\")", .fml_last(cl, dsr), cl, covid_r, cl, covid_r + 2), 3, 7)
+      if (!is.na(elec_r)) .wf(wb, sn, .fml_pct_fixed(cl, dsr, elec_r, elec_r + 2), 3, 8)
+      if (!is.na(office_r)) .wf(wb, sn, sprintf("IFERROR(%s/%s$%d-1,\"\")", .fml_last(cl, dsr), cl, office_r), 3, 9)
+      .wf(wb, sn, sprintf('IFERROR(%s/_xlfn.XLOOKUP("January "&TEXT(TODAY(),"yyyy"),A$%d:A$1048576,B$%d:B$1048576)-1,"")', .fml_last("B", dsr), dsr, dsr), 3, 10)
+
+      addStyle(wb, sn, .num_fmt(), rows = 2, cols = 2:11, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .pct_fmt(), rows = 3, cols = 3:10, gridExpand = TRUE, stack = TRUE)
+      addStyle(wb, sn, .cmp_sep(), rows = 3, cols = 1:11, gridExpand = TRUE, stack = TRUE)
     }
   }
   
@@ -2034,7 +2036,7 @@ create_audit_workbook <- function(
     list(lab = "50-64s inactivity (000s)",           sh = "2",  cells = c("BD5","BD6","BD7","BD8","BD10"), rate = FALSE),
     list(lab = "50-64s inactivity rate",             sh = "2",  cells = c("BE5","BE6","BE7","BE8","BE10"), rate = TRUE),
     list(lab = "Payrolled employees (000s)",         sh = "1. Payrolled employees (UK)",
-         cells = c("B2","D2","E2","F2","G2"), rate = FALSE),
+         cells = c("B2","D2","E2","G2","H2"), rate = FALSE),
     list(lab = "Vacancies (000s)",                   sh = "20", cells = c("B2","B3","B4","B5","B6"),       rate = FALSE),
     list(lab = "Wage growth, total pay (yearly %)",  sh = "13", cells = c("D4","D5","D6","D7","D8"),       rate = TRUE),
     list(lab = "Wage growth, CPI-adjusted (yearly %)", sh = "AWE Real_CPI",
