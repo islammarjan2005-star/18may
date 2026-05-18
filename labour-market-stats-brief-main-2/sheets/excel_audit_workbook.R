@@ -1377,9 +1377,10 @@ create_audit_workbook <- function(
       writeData(wb, sn, tbl_20, colNames = FALSE, startRow = 9)
       .restore_text(wb, sn, tbl_20, 9)
       
-      # Detect data start row (source data col C = output col 3)
+      # Detect data start row by date label; col 3's first number is the
+      # publication date, which would fool .first_num_r
       off_20 <- 8
-      dsr_20 <- .first_num_r(tbl_20, 3) + off_20  # vacancies in col 3 (C)
+      dsr_20 <- .data_row(tbl_20, off_20 + 1)
       
       # Find baseline rows dynamically 
       .fr20 <- function(label) {
@@ -1508,9 +1509,10 @@ create_audit_workbook <- function(
       writeData(wb, sn, tbl_21, colNames = FALSE, startRow = 9)
       .restore_text(wb, sn, tbl_21, 9)
       
-      # Detect data start row (first numeric in col 3)
+      # Detect data start row by date label; col 3's first number is the
+      # publication date, which would fool .first_num_r
       off_21 <- 8
-      dsr_21 <- .first_num_r(tbl_21, 3) + off_21
+      dsr_21 <- .data_row(tbl_21, off_21 + 1)
       
       # Find baseline rows
       .fr21 <- function(label) {
