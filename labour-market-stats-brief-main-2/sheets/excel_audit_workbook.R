@@ -2182,15 +2182,28 @@ create_audit_workbook <- function(
       last_r <- 3 + length(countries)
       addStyle(wb, ft, .pct_fmt(), rows = 4:last_r, cols = 5:7, gridExpand = TRUE, stack = TRUE)
 
-      # UK relative to the Euro area (blank until Euro-area data is present)
-      if (!is.na(uk_row) && !is.na(euro_row)) {
+      # UK summary rows below the country table
+      if (!is.na(uk_row)) {
         rr <- last_r + 2
-        writeData(wb, ft, "UK relative to Euro area", startRow = rr, startCol = 4)
+
+        # UK relative to the Euro area (blank until Euro-area data is present)
+        if (!is.na(euro_row)) {
+          writeData(wb, ft, "UK relative to Euro area", startRow = rr, startCol = 4)
+          addStyle(wb, ft, .cmp_label(), rows = rr, cols = 4, stack = TRUE)
+          for (cc in 5:7)
+            .wf(wb, ft, sprintf('IFERROR(%s%d-%s%d,"")',
+                                .col_letter(cc), euro_row, .col_letter(cc), uk_row), rr, cc)
+          addStyle(wb, ft, .pct_fmt(), rows = rr, cols = 5:7, gridExpand = TRUE, stack = TRUE)
+          rr <- rr + 1
+        }
+
+        # UK rank against the listed countries — 1 = best on each measure
+        # (lowest unemployment, highest employment, lowest inactivity)
+        writeData(wb, ft, "UK rank (1 = best)", startRow = rr, startCol = 4)
         addStyle(wb, ft, .cmp_label(), rows = rr, cols = 4, stack = TRUE)
-        for (cc in 5:7)
-          .wf(wb, ft, sprintf('IFERROR(%s%d-%s%d,"")',
-                              .col_letter(cc), euro_row, .col_letter(cc), uk_row), rr, cc)
-        addStyle(wb, ft, .pct_fmt(), rows = rr, cols = 5:7, gridExpand = TRUE, stack = TRUE)
+        .wf(wb, ft, sprintf("RANK(E%d,$E$4:$E$%d,1)", uk_row, last_r), rr, 5)
+        .wf(wb, ft, sprintf("RANK(F%d,$F$4:$F$%d,0)", uk_row, last_r), rr, 6)
+        .wf(wb, ft, sprintf("RANK(G%d,$G$4:$G$%d,1)", uk_row, last_r), rr, 7)
       }
       setColWidths(wb, ft, cols = 1:7, widths = c(26, 12, 12, 14, 24, 24, 24))
     } else {
