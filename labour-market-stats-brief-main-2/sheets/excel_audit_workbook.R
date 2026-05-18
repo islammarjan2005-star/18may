@@ -1660,10 +1660,9 @@ create_audit_workbook <- function(
       }
     }
     
-    # Col 3: Total Pay % — current YoY and its quarter/year change (source col E)
-    .wf(wb, sn, .fml_last("E", dsr_cpi_e),         2, 3)
-    .wf(wb, sn, .fml_idx_change("E", dsr_cpi_e, 3),  3, 3)
-    .wf(wb, sn, .fml_idx_change("E", dsr_cpi_e, 12), 4, 3)
+    # Col 3: Total Pay real-pay % — only the year-on-year growth rate is shown,
+    # on its own row; Current and quarter rows stay blank (source layout).
+    .wf(wb, sn, .fml_last("E", dsr_cpi_e), 4, 3)
     for (bl in list(
       list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
       list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
@@ -1675,10 +1674,8 @@ create_audit_workbook <- function(
                             .fml_avg_last("B", dsr_cpi_b), "B", bl$r1, "B", bl$r3), bl$r, 3)
     }
     
-    # Col 5: Regular Pay % — current YoY and its quarter/year change (source col I)
-    .wf(wb, sn, .fml_last("I", dsr_cpi_i),         2, 5)
-    .wf(wb, sn, .fml_idx_change("I", dsr_cpi_i, 3),  3, 5)
-    .wf(wb, sn, .fml_idx_change("I", dsr_cpi_i, 12), 4, 5)
+    # Col 5: Regular Pay real-pay % — year-on-year growth rate only (source col I).
+    .wf(wb, sn, .fml_last("I", dsr_cpi_i), 4, 5)
     for (bl in list(
       list(r = 5, r1 = covid_cpi_r1, r3 = covid_cpi_r3),
       list(r = 6, r1 = e2010_cpi_r1, r3 = e2010_cpi_r3),
@@ -2046,7 +2043,7 @@ create_audit_workbook <- function(
     list(lab = "Wage growth in cash terms (total pay, including bonuses, yearly % change)",
          sh = "13", cells = c("D4","B5","B6","B7","B8"), rate = TRUE, chg = "gbp"),
     list(lab = "Wage growth adjusted for inflation (total pay, including bonuses, yearly % change)",
-         sh = "AWE Real_CPI", cells = c("C2","B3","B4","B5","B8"), rate = TRUE, chg = "gbp")
+         sh = "AWE Real_CPI", cells = c("C4","B3","B4","B5","B8"), rate = TRUE, chg = "gbp")
   )
 
   dash_r1 <- dash_hdr + 1
