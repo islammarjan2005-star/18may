@@ -1624,9 +1624,10 @@ create_audit_workbook <- function(
       idx <- which(dates_cpi == as.Date(d))
       if (length(idx)) idx[1] + off_cpi else NA_integer_
     }
+    # each baseline is the 3-month average ending at the reference month
     covid_cpi_r1 <- .drc("2019-12-01"); covid_cpi_r3 <- .drc("2020-02-01")
-    e2010_cpi_r1 <- .drc("2010-04-01"); e2010_cpi_r3 <- .drc("2010-06-01")
-    fc_cpi_r1    <- .drc("2007-12-01"); fc_cpi_r3    <- .drc("2008-02-01")
+    e2010_cpi_r1 <- .drc("2010-02-01"); e2010_cpi_r3 <- .drc("2010-04-01")
+    fc_cpi_r1    <- .drc("2007-10-01"); fc_cpi_r3    <- .drc("2007-12-01")
     e2024_cpi_r1 <- .drc("2024-04-01"); e2024_cpi_r3 <- .drc("2024-06-01")
     
     # Write formulas
