@@ -817,8 +817,9 @@ create_audit_workbook <- function(
       
       cmp_labels_10 <- c("Current", "Quarterly change", "year on year change",
                          "Since pandemic", "Since 2010 election")
-      s10_dsr <- 10  # data start row in output
-      
+      s10_dsr  <- 10  # write row for the ONS table
+      s10_data <- .data_row(tbl_10_full, s10_dsr)  # row where real data begins
+
       s10_covid_row  <- .find_output_row(tbl_10_full, 1, lab_covid,      s10_dsr)
       s10_elec10_row <- .find_output_row(tbl_10_full, 1, "Feb-Apr 2010", s10_dsr)
       
@@ -829,11 +830,11 @@ create_audit_workbook <- function(
         for (ci in 2:min(ncol(tbl_10_full), 7)) {
           cl <- .col_letter(ci)
           fml <- switch(as.character(i),
-                        "1" = .fml_last(cl, s10_dsr),
-                        "2" = .fml_idx_change(cl, s10_dsr, 3),
-                        "3" = .fml_idx_change(cl, s10_dsr, 12),
-                        "4" = if (!is.na(s10_covid_row))  .fml_idx_change_fixed(cl, s10_dsr, s10_covid_row)  else NULL,
-                        "5" = if (!is.na(s10_elec10_row)) .fml_idx_change_fixed(cl, s10_dsr, s10_elec10_row) else NULL
+                        "1" = .fml_last(cl, s10_data),
+                        "2" = .fml_idx_change(cl, s10_data, 3),
+                        "3" = .fml_idx_change(cl, s10_data, 12),
+                        "4" = if (!is.na(s10_covid_row))  .fml_idx_change_fixed(cl, s10_data, s10_covid_row)  else NULL,
+                        "5" = if (!is.na(s10_elec10_row)) .fml_idx_change_fixed(cl, s10_data, s10_elec10_row) else NULL
           )
           if (!is.null(fml)) .wf(wb, sn, fml, r, ci)
         }
