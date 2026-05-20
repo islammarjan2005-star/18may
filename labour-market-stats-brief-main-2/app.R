@@ -549,7 +549,6 @@ ui <- fluidPage(
                                              actionButton("manual_preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
-                                             actionButton("manual_preview_charts", "Charts", class = "govuk-button govuk-button--blue"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -598,7 +597,6 @@ ui <- fluidPage(
                                              actionButton("preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
-                                             actionButton("preview_charts", "Charts", class = "govuk-button govuk-button--blue"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -634,20 +632,37 @@ ui <- fluidPage(
                 div(class = "dashboard-card",
                     div(class = "dashboard-card__header", "Key Charts Preview"),
                     div(class = "dashboard-card__content",
-                        div(style = "display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; margin-bottom:14px;",
-                            div(style = "flex:2; min-width:300px;",
-                                selectInput("chart_metrics", "Metrics to chart",
-                                            choices = chart_metric_choices(),
-                                            selected = c("unemp16", "payroll_change", "youth_unemp", "inact"),
-                                            multiple = TRUE, width = "100%")),
+                        div(style = "display:flex; gap:36px; flex-wrap:wrap; align-items:flex-start; margin-bottom:18px;",
+
+                            # left: metric checklist
+                            div(style = "flex:2; min-width:320px;",
+                                tags$label(class = "govuk-label govuk-label--s",
+                                           style = "margin-bottom:8px;", "Metrics to chart"),
+                                checkboxGroupInput("chart_metrics", label = NULL,
+                                                   choices = chart_metric_choices(),
+                                                   selected = c("unemp16", "payroll_change", "youth_unemp", "inact"))),
+
+                            # right: time window + generate button
                             div(style = "flex:1; min-width:240px;",
-                                sliderInput("chart_years", "Time period (years)",
-                                            min = 1971, max = as.integer(format(Sys.Date(), "%Y")),
-                                            value = c(2010L, as.integer(format(Sys.Date(), "%Y"))),
-                                            step = 1, sep = ""))
+                                tags$label(class = "govuk-label govuk-label--s",
+                                           style = "margin-bottom:8px;", "Time period"),
+                                div(style = "display:flex; gap:12px; margin-bottom:18px;",
+                                    div(style = "flex:1;",
+                                        selectInput("chart_year_from", "From",
+                                                    choices = 1971:as.integer(format(Sys.Date(), "%Y")),
+                                                    selected = 2010, width = "100%")),
+                                    div(style = "flex:1;",
+                                        selectInput("chart_year_to", "To",
+                                                    choices = 1971:as.integer(format(Sys.Date(), "%Y")),
+                                                    selected = as.integer(format(Sys.Date(), "%Y")),
+                                                    width = "100%"))),
+                                actionButton("regenerate_charts", "Generate charts",
+                                             class = "govuk-button govuk-button--blue",
+                                             style = "width:100%;"),
+                                div(class = "govuk-hint",
+                                    style = "margin-top:10px;",
+                                    "Click after changing the selection. The same charts are appended to the Word briefing."))
                         ),
-                        div(class = "govuk-hint",
-                            "Pick metrics and a period, then click ‘Charts’ on the tab above. The same charts are appended to the Word briefing."),
                         plotOutput("charts_preview", height = "auto")
                     )
                 )
@@ -1690,10 +1705,11 @@ server <- function(input, output, session) {
             source("sheets/vacancies.R", local = FALSE)
             source("sheets/redundancy.R", local = FALSE)
             source("sheets/wages_nominal.R", local = FALSE)
-            yrs <- input$chart_years
+            yr_from <- suppressWarnings(as.integer(input$chart_year_from))
+            yr_to   <- suppressWarnings(as.integer(input$chart_year_to))
             append_key_charts_page(
               file,
-              build_chart_series(input$chart_metrics, yrs[1], yrs[2], "auto",
+              build_chart_series(input$chart_metrics, yr_from, yr_to, "auto",
                                  build_auto_sources(input$chart_metrics))
             )
           }, error = function(e) message("Key Charts page skipped: ", e$message))
@@ -1954,50 +1970,53 @@ server <- function(input, output, session) {
   # charts preview (configurable Key Charts page) — config inputs shared by both tabs
   charts_preview_data <- reactiveVal(NULL)
 
-  observeEvent(input$manual_preview_charts, {
-    if (!.check_manual_ready()) return()
+  observeEvent(input$regenerate_charts, {
     if (length(input$chart_metrics) == 0) {
       showNotification("Select at least one metric to chart", type = "warning")
       return()
     }
-    withProgress(message = "building charts...", value = 0, {
-      incProgress(0.3, detail = "reading files...")
-      yrs <- input$chart_years
-      series <- tryCatch(
-        build_chart_series(input$chart_metrics, yrs[1], yrs[2], "manual",
-                           list(file_a01 = uploaded_files$a01, file_rtisa = uploaded_files$rtisa)),
-        error = function(e) {
-          showNotification(paste("Charts error:", e$message), type = "error"); NULL
-        })
-      charts_preview_data(series)
-      incProgress(0.7, detail = "done")
-    })
-    showNotification("Charts generated (Manual Upload)", type = "message", duration = 3)
-  })
+    yr_from <- suppressWarnings(as.integer(input$chart_year_from))
+    yr_to   <- suppressWarnings(as.integer(input$chart_year_to))
+    if (is.na(yr_from) || is.na(yr_to) || yr_from > yr_to) {
+      showNotification("Set a valid time period (From year must be ≤ To year)", type = "warning")
+      return()
+    }
+    flow <- input$mode_tabs
 
-  observeEvent(input$preview_charts, {
-    if (length(input$chart_metrics) == 0) {
-      showNotification("Select at least one metric to chart", type = "warning")
-      return()
+    if (identical(flow, "manual")) {
+      if (!.check_manual_ready()) return()
+      withProgress(message = "building charts...", value = 0, {
+        incProgress(0.3, detail = "reading files...")
+        series <- tryCatch(
+          build_chart_series(input$chart_metrics, yr_from, yr_to, "manual",
+                             list(file_a01 = uploaded_files$a01,
+                                  file_rtisa = uploaded_files$rtisa)),
+          error = function(e) {
+            showNotification(paste("Charts error:", e$message), type = "error"); NULL
+          })
+        charts_preview_data(series)
+        incProgress(0.7, detail = "done")
+      })
+      showNotification("Charts generated (Manual Upload)", type = "message", duration = 3)
+    } else {
+      withProgress(message = "building charts...", value = 0, {
+        incProgress(0.3, detail = "querying database...")
+        source("sheets/lfs.R", local = FALSE)
+        source("sheets/payroll.R", local = FALSE)
+        source("sheets/vacancies.R", local = FALSE)
+        source("sheets/redundancy.R", local = FALSE)
+        source("sheets/wages_nominal.R", local = FALSE)
+        series <- tryCatch(
+          build_chart_series(input$chart_metrics, yr_from, yr_to, "auto",
+                             build_auto_sources(input$chart_metrics)),
+          error = function(e) {
+            showNotification(paste("Charts error:", e$message), type = "error"); NULL
+          })
+        charts_preview_data(series)
+        incProgress(0.7, detail = "done")
+      })
+      showNotification("Charts loaded (Database)", type = "message", duration = 3)
     }
-    withProgress(message = "building charts...", value = 0, {
-      incProgress(0.3, detail = "querying database...")
-      source("sheets/lfs.R", local = FALSE)
-      source("sheets/payroll.R", local = FALSE)
-      source("sheets/vacancies.R", local = FALSE)
-      source("sheets/redundancy.R", local = FALSE)
-      source("sheets/wages_nominal.R", local = FALSE)
-      yrs <- input$chart_years
-      series <- tryCatch(
-        build_chart_series(input$chart_metrics, yrs[1], yrs[2], "auto",
-                           build_auto_sources(input$chart_metrics)),
-        error = function(e) {
-          showNotification(paste("Charts error:", e$message), type = "error"); NULL
-        })
-      charts_preview_data(series)
-      incProgress(0.7, detail = "done")
-    })
-    showNotification("Charts loaded (Database)", type = "message", duration = 3)
   })
 
   # manual preview: oecd
@@ -2248,10 +2267,11 @@ server <- function(input, output, session) {
             )
             # append the configurable Key Charts page (native editable charts)
             tryCatch({
-              yrs <- input$chart_years
+              yr_from <- suppressWarnings(as.integer(input$chart_year_from))
+              yr_to   <- suppressWarnings(as.integer(input$chart_year_to))
               append_key_charts_page(
                 file,
-                build_chart_series(input$chart_metrics, yrs[1], yrs[2], "manual",
+                build_chart_series(input$chart_metrics, yr_from, yr_to, "manual",
                                    list(file_a01 = uploaded_files$a01,
                                         file_rtisa = uploaded_files$rtisa))
               )
