@@ -266,18 +266,47 @@ chart_metric_choices <- function() {
 # Build a list of chart objects (one per selected metric), each clipped to the
 # [year_from, year_to] window. Metrics with no data yield an empty chart so the
 # preview can flag them; append_key_charts_page() drops those from the Word doc.
-build_chart_series <- function(metric_ids, year_from, year_to, flow, sources) {
+build_chart_series <- function(chart_configs, flow, sources) {
   charts <- list()
-  for (id in metric_ids) {
-    md <- .chart_metric_def(id)
+  for (cfg in chart_configs) {
+    md <- .chart_metric_def(cfg$id)
     if (is.null(md)) next
-    s <- tryCatch(.wc_extract(id, flow, sources), error = function(e) NULL)
+
+    sm_kind <- if (is.null(cfg$smoothing) || !nzchar(cfg$smoothing)) "raw" else cfg$smoothing
+    suffix  <- switch(sm_kind,
+                      rolling3  = " — 3-month rolling avg",
+                      rolling12 = " — 12-month rolling avg",
+                      annual    = " — annual average",
+                      "")
+
+    base_chart <- list(
+      id     = md$id,
+      label  = paste0(md$label, suffix),
+      type   = if (is.null(cfg$type) || !nzchar(cfg$type)) md$type else cfg$type,
+      colour = md$colour,
+      unit   = md$unit,
+      source = md$source,
+      ymin   = if (is.null(cfg$ymin)) NA_real_ else cfg$ymin,
+      ymax   = if (is.null(cfg$ymax)) NA_real_ else cfg$ymax
+    )
+
+    s <- tryCatch(.wc_extract(cfg$id, flow, sources), error = function(e) NULL)
     if (is.null(s) || length(s$val) == 0) {
-      charts[[length(charts) + 1]] <- c(md, list(cat = character(0), val = numeric(0)))
+      charts[[length(charts) + 1]] <- c(base_chart, list(cat = character(0), val = numeric(0)))
       next
     }
-    keep <- which(!is.na(s$year) & s$year >= year_from & s$year <= year_to)
-    charts[[length(charts) + 1]] <- c(md, list(cat = s$cat[keep], val = s$val[keep]))
+
+    yr_from <- cfg$year_from; yr_to <- cfg$year_to
+    if (is.null(yr_from) || is.na(yr_from)) yr_from <- suppressWarnings(min(s$year, na.rm = TRUE))
+    if (is.null(yr_to)   || is.na(yr_to))   yr_to   <- suppressWarnings(max(s$year, na.rm = TRUE))
+
+    keep <- which(!is.na(s$year) & s$year >= yr_from & s$year <= yr_to)
+    if (length(keep) == 0) {
+      charts[[length(charts) + 1]] <- c(base_chart, list(cat = character(0), val = numeric(0)))
+      next
+    }
+    sm <- .wc_smooth(s$cat[keep], s$val[keep], s$year[keep], sm_kind)
+    charts[[length(charts) + 1]] <- c(base_chart, list(cat = sm$cat, val = sm$val))
   }
   charts
 }
@@ -334,6 +363,47 @@ build_auto_sources <- function(metric_ids) {
          pts, '</c:numLit>')
 }
 
+# Smoothing applied AFTER clipping to a chart's time window. Trailing rolling
+# mean (sides = 1) so the series ends at the latest data point — briefing
+# convention. "annual" collapses to one point per year.
+.wc_smooth <- function(cat, val, year, kind) {
+  kind <- if (is.null(kind) || !nzchar(kind)) "raw" else kind
+  if (kind == "raw") return(list(cat = cat, val = val, year = year))
+  if (kind %in% c("rolling3", "rolling12")) {
+    k <- if (kind == "rolling3") 3L else 12L
+    if (length(val) < k) return(list(cat = character(0), val = numeric(0), year = integer(0)))
+    f <- as.numeric(stats::filter(val, rep(1 / k, k), sides = 1))
+    keep <- !is.na(f)
+    return(list(cat = cat[keep], val = f[keep], year = year[keep]))
+  }
+  if (kind == "annual") {
+    if (length(val) == 0) return(list(cat = character(0), val = numeric(0), year = integer(0)))
+    ok <- !is.na(val)
+    if (!any(ok)) return(list(cat = character(0), val = numeric(0), year = integer(0)))
+    agg <- tapply(val[ok], year[ok], mean, na.rm = TRUE)
+    yrs <- as.integer(names(agg))
+    ord <- order(yrs)
+    return(list(cat = as.character(yrs[ord]), val = as.numeric(agg)[ord], year = yrs[ord]))
+  }
+  list(cat = cat, val = val, year = year)
+}
+
+# Build the <c:scaling> block for the value axis. Optional ymin/ymax inject
+# <c:min>/<c:max> in schema order; NA on either side means autoscale that side.
+.wc_val_scaling <- function(ymin = NA_real_, ymax = NA_real_) {
+  if (is.null(ymin)) ymin <- NA_real_
+  if (is.null(ymax)) ymax <- NA_real_
+  if (!is.na(ymin) && !is.na(ymax) && ymin >= ymax) {
+    warning("ymin >= ymax; falling back to autoscale")
+    ymin <- NA_real_; ymax <- NA_real_
+  }
+  parts <- c('<c:scaling>', '<c:orientation val="minMax"/>')
+  if (!is.na(ymax)) parts <- c(parts, sprintf('<c:max val="%s"/>', .wc_num1(ymax)))
+  if (!is.na(ymin)) parts <- c(parts, sprintf('<c:min val="%s"/>', .wc_num1(ymin)))
+  parts <- c(parts, '</c:scaling>')
+  paste(parts, collapse = "")
+}
+
 
 # ---- chart XML templates (inlined to avoid committing .xml files) ----
 .WC_LINE_TEMPLATE <- r"----(<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -341,12 +411,56 @@ build_auto_sources <- function(metric_ids) {
 .WC_BAR_TEMPLATE  <- r"----(<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:c16r2="http://schemas.microsoft.com/office/drawing/2015/06/chart"><c:date1904 val="0"/><c:lang val="en-US"/><c:roundedCorners val="0"/><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="c14" xmlns:c14="http://schemas.microsoft.com/office/drawing/2007/8/2/chart"><c14:style val="102"/></mc:Choice><mc:Fallback><c:style val="2"/></mc:Fallback></mc:AlternateContent><c:clrMapOvr bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/><c:chart><c:autoTitleDeleted val="1"/><c:plotArea><c:layout><c:manualLayout><c:layoutTarget val="inner"/><c:xMode val="edge"/><c:yMode val="edge"/><c:x val="0.14635489725000228"/><c:y val="5.9741215254997371E-2"/><c:w val="0.79362141102119832"/><c:h val="0.86684838768949646"/></c:manualLayout></c:layout><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/><c:ser><c:idx val="0"/><c:order val="0"/><c:spPr><a:solidFill><a:srgbClr val="__SERIES_COLOUR__"/></a:solidFill><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr><c:invertIfNegative val="1"/><c:cat>__CAT_CACHE__</c:cat><c:val>__VAL_CACHE__</c:val><c:extLst><c:ext uri="{6F2FDCE9-48DA-4B69-8628-5D25D57E5C99}" xmlns:c14="http://schemas.microsoft.com/office/drawing/2007/8/2/chart"><c14:invertSolidFillFmt><c14:spPr xmlns:c14="http://schemas.microsoft.com/office/drawing/2007/8/2/chart"><a:solidFill><a:srgbClr val="7B005B"/></a:solidFill><a:ln><a:noFill/></a:ln><a:effectLst/></c14:spPr></c14:invertSolidFillFmt></c:ext><c:ext uri="{C3380CC4-5D6E-409C-BE32-E72D297353CC}" xmlns:c16="http://schemas.microsoft.com/office/drawing/2014/chart"><c16:uniqueId val="{00000000-C1DA-43E9-BF6E-B193466C17A5}"/></c:ext></c:extLst></c:ser><c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls><c:gapWidth val="50"/><c:overlap val="-27"/><c:axId val="1330111023"/><c:axId val="1330093743"/></c:barChart><c:catAx><c:axId val="1330111023"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="[$-F800]dddd\,\ mmmm\ dd\,\ yyyy" sourceLinked="0"/><c:majorTickMark val="out"/><c:minorTickMark val="none"/><c:tickLblPos val="low"/><c:spPr><a:noFill/><a:ln w="12700" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:sysClr val="windowText" lastClr="000000"/></a:solidFill><a:round/></a:ln><a:effectLst/></c:spPr><c:txPr><a:bodyPr rot="-60000000" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="700" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0"><a:solidFill><a:sysClr val="windowText" lastClr="000000"/></a:solidFill><a:latin typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:ea typeface="+mn-ea"/><a:cs typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:crossAx val="1330093743"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:tickLblSkip val="12"/><c:noMultiLvlLbl val="0"/></c:catAx><c:valAx><c:axId val="1330093743"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:solidFill><a:schemeClr val="tx1"><a:lumMod val="15000"/><a:lumOff val="85000"/></a:schemeClr></a:solidFill><a:round/></a:ln><a:effectLst/></c:spPr></c:majorGridlines><c:numFmt formatCode="_-* #,##0_-;\-* #,##0_-;_-* &quot;-&quot;??_-;_-@_-" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr><c:txPr><a:bodyPr rot="-60000000" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="700" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0"><a:solidFill><a:sysClr val="windowText" lastClr="000000"/></a:solidFill><a:latin typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:ea typeface="+mn-ea"/><a:cs typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr><c:crossAx val="1330111023"/><c:crosses val="autoZero"/><c:crossBetween val="between"/><c:dispUnits><c:builtInUnit val="thousands"/><c:dispUnitsLbl><c:layout><c:manualLayout><c:xMode val="edge"/><c:yMode val="edge"/><c:x val="8.5253868083726911E-3"/><c:y val="1.2039458857755527E-2"/></c:manualLayout></c:layout><c:tx><c:rich><a:bodyPr rot="-5400000" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1000" b="0" i="0" u="none" strike="noStrike" kern="1200" baseline="0"><a:solidFill><a:sysClr val="windowText" lastClr="000000"/></a:solidFill><a:latin typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:ea typeface="+mn-ea"/><a:cs typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/></a:defRPr></a:pPr><a:r><a:rPr lang="en-GB" sz="700"/><a:t>Thousands</a:t></a:r></a:p></c:rich></c:tx><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln><a:effectLst/></c:spPr></c:dispUnitsLbl></c:dispUnits></c:valAx></c:plotArea><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/><c:showDLblsOverMax val="0"/><c:extLst/></c:chart><c:spPr><a:solidFill><a:schemeClr val="bg1"/></a:solidFill><a:ln w="9525" cap="flat" cmpd="sng" algn="ctr"><a:noFill/><a:round/></a:ln><a:effectLst/></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:sysClr val="windowText" lastClr="000000"/></a:solidFill><a:latin typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/><a:cs typeface="Arial" panose="020B0604020202020204" pitchFamily="34" charset="0"/></a:defRPr></a:pPr><a:endParaRPr lang="en-US"/></a:p></c:txPr></c:chartSpace>)----"
 
+# Post-template transforms (keep the raw strings above byte-identical to the
+# source-of-truth chart XML; mutations happen here at source-load time).
+
+# Inject a __VAL_SCALING__ token into the valAx scaling of a template so
+# build_chart_xml() can substitute user min/max at render time. The catAx
+# scaling stays literal; we target the post-<c:valAx> region only.
+.wc_inject_val_scaling <- function(tmpl) {
+  parts <- strsplit(tmpl, "<c:valAx>", fixed = TRUE)[[1]]
+  if (length(parts) < 2) return(tmpl)
+  parts[2] <- sub('<c:scaling><c:orientation val="minMax"/></c:scaling>',
+                  '__VAL_SCALING__', parts[2], fixed = TRUE)
+  paste(parts, collapse = "<c:valAx>")
+}
+.WC_LINE_TEMPLATE <- .wc_inject_val_scaling(.WC_LINE_TEMPLATE)
+.WC_BAR_TEMPLATE  <- .wc_inject_val_scaling(.WC_BAR_TEMPLATE)
+
+# Bar template originally has no <c:tx> in its <c:ser>; add one so the
+# (possibly smoothing-suffixed) label appears as the internal series name too.
+.WC_BAR_TEMPLATE <- sub(
+  '<c:ser><c:idx val="0"/><c:order val="0"/><c:spPr>',
+  '<c:ser><c:idx val="0"/><c:order val="0"/><c:tx><c:v>__SERIES_NAME__</c:v></c:tx><c:spPr>',
+  .WC_BAR_TEMPLATE, fixed = TRUE)
+
+# Area template — derived from the line template at source-load:
+#   - <c:lineChart> -> <c:areaChart>
+#   - series <c:spPr> changed from "stroke only" to "fill + outline"
+#   - <c:marker> and all <c:smooth> dropped (areaChart schema disallows them)
+.WC_AREA_TEMPLATE <- local({
+  out <- .WC_LINE_TEMPLATE
+  out <- gsub("<c:lineChart>",  "<c:areaChart>",  out, fixed = TRUE)
+  out <- gsub("</c:lineChart>", "</c:areaChart>", out, fixed = TRUE)
+  out <- sub(
+    '<c:spPr><a:ln w="28575" cap="rnd"><a:solidFill><a:srgbClr val="__SERIES_COLOUR__"/></a:solidFill><a:round/></a:ln><a:effectLst/></c:spPr>',
+    '<c:spPr><a:solidFill><a:srgbClr val="__SERIES_COLOUR__"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="__SERIES_COLOUR__"/></a:solidFill></a:ln><a:effectLst/></c:spPr>',
+    out, fixed = TRUE)
+  out <- sub('<c:marker><c:symbol val="none"/></c:marker>', '', out, fixed = TRUE)
+  out <- gsub('<c:smooth val="0"/>', '', out, fixed = TRUE)
+  out
+})
+
+
 build_chart_xml <- function(chart) {
-  out <- if (identical(chart$type, "bar")) .WC_BAR_TEMPLATE else .WC_LINE_TEMPLATE
-  out <- gsub("__SERIES_NAME__",   .wc_xml_escape(chart$label), out, fixed = TRUE)
-  out <- gsub("__SERIES_COLOUR__", chart$colour,                out, fixed = TRUE)
-  out <- gsub("__CAT_CACHE__",     .wc_cat_cache(chart$cat),    out, fixed = TRUE)
-  out <- gsub("__VAL_CACHE__",     .wc_val_cache(chart$val),    out, fixed = TRUE)
+  out <- if (identical(chart$type, "bar"))       .WC_BAR_TEMPLATE
+         else if (identical(chart$type, "area")) .WC_AREA_TEMPLATE
+         else                                    .WC_LINE_TEMPLATE
+  out <- gsub("__SERIES_NAME__",   .wc_xml_escape(chart$label),                 out, fixed = TRUE)
+  out <- gsub("__SERIES_COLOUR__", chart$colour,                                out, fixed = TRUE)
+  out <- gsub("__CAT_CACHE__",     .wc_cat_cache(chart$cat),                    out, fixed = TRUE)
+  out <- gsub("__VAL_CACHE__",     .wc_val_cache(chart$val),                    out, fixed = TRUE)
+  out <- gsub("__VAL_SCALING__",   .wc_val_scaling(chart$ymin, chart$ymax),     out, fixed = TRUE)
   out
 }
 
@@ -485,6 +599,24 @@ append_key_charts_page <- function(docx_path, charts) {
   mtext(paste0("Source: ", ch$source), side = 1, line = 2.3, cex = 0.6, col = "grey50")
 }
 
+.wc_draw_area <- function(ch, title) {
+  y <- ch$val; x <- seq_along(y)
+  plot(x, y, type = "n", xaxt = "n", xlab = "", ylab = ch$unit,
+       main = "", bty = "n", las = 1)
+  abline(h = axTicks(2), col = "grey90", lwd = 0.8)
+  base <- suppressWarnings(min(y, na.rm = TRUE))
+  if (!is.finite(base)) base <- 0
+  polygon(c(x, rev(x)), c(y, rep(base, length(y))),
+          col = paste0("#", ch$colour, "55"), border = NA)
+  lines(x, y, lwd = 2, col = paste0("#", ch$colour))
+  title(main = title, cex.main = 0.98, font.main = 2, adj = 0)
+  yr  <- ch$cat
+  chg <- which(c(TRUE, yr[-1] != yr[-length(yr)]))
+  if (length(chg) > 8) chg <- chg[round(seq(1, length(chg), length.out = 8))]
+  axis(1, at = x[chg], labels = yr[chg], cex.axis = 0.8)
+  mtext(paste0("Source: ", ch$source), side = 1, line = 2.3, cex = 0.6, col = "grey50")
+}
+
 render_key_charts_preview <- function(charts) {
   charts <- Filter(Negate(is.null), charts)
   n <- length(charts)
@@ -503,6 +635,8 @@ render_key_charts_preview <- function(charts) {
       text(0.5, 0.5, "Data unavailable", col = "grey45")
       next
     }
-    if (identical(ch$type, "bar")) .wc_draw_bar(ch, title) else .wc_draw_line(ch, title)
+    if (identical(ch$type, "bar"))       .wc_draw_bar(ch, title)
+    else if (identical(ch$type, "area")) .wc_draw_area(ch, title)
+    else                                 .wc_draw_line(ch, title)
   }
 }
