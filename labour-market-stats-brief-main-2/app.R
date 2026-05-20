@@ -1,5 +1,7 @@
 library(shiny)
 
+source("utils/word_charts.R")
+
 ui <- fluidPage(
   
   tags$head(
@@ -547,7 +549,8 @@ ui <- fluidPage(
                                              actionButton("manual_preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
-                                             
+                                             actionButton("manual_preview_charts", "Charts", class = "govuk-button govuk-button--blue"),
+
                                              tags$hr(class = "govuk-section-break"),
                                              
                                              h2(class = "govuk-heading-m", "Download"),
@@ -595,7 +598,8 @@ ui <- fluidPage(
                                              actionButton("preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
-                                             
+                                             actionButton("preview_charts", "Charts", class = "govuk-button govuk-button--blue"),
+
                                              tags$hr(class = "govuk-section-break"),
                                              
                                              h2(class = "govuk-heading-m", "Download"),
@@ -626,6 +630,26 @@ ui <- fluidPage(
                 div(class = "dashboard-card",
                     div(class = "dashboard-card__header", "OECD International Comparisons"),
                     div(class = "dashboard-card__content preview-scroll", uiOutput("oecd_preview"))
+                ),
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "Key Charts Preview"),
+                    div(class = "dashboard-card__content",
+                        div(style = "display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; margin-bottom:14px;",
+                            div(style = "flex:2; min-width:300px;",
+                                selectInput("chart_metrics", "Metrics to chart",
+                                            choices = chart_metric_choices(),
+                                            selected = c("unemp16", "payroll_change", "youth_unemp", "inact"),
+                                            multiple = TRUE, width = "100%")),
+                            div(style = "flex:1; min-width:240px;",
+                                sliderInput("chart_years", "Time period (years)",
+                                            min = 1971, max = as.integer(format(Sys.Date(), "%Y")),
+                                            value = c(2010L, as.integer(format(Sys.Date(), "%Y"))),
+                                            step = 1, sep = ""))
+                        ),
+                        div(class = "govuk-hint",
+                            "Pick metrics and a period, then click ‘Charts’ on the tab above. The same charts are appended to the Word briefing."),
+                        plotOutput("charts_preview", height = "auto")
+                    )
                 )
       )
   ),
@@ -1658,7 +1682,22 @@ server <- function(input, output, session) {
             payroll_mode_override = pay_mode,
             contact_names = input$auto_contact_names
           )
-          
+
+          # append the configurable Key Charts page (native editable charts)
+          tryCatch({
+            source("sheets/lfs.R", local = FALSE)
+            source("sheets/payroll.R", local = FALSE)
+            source("sheets/vacancies.R", local = FALSE)
+            source("sheets/redundancy.R", local = FALSE)
+            source("sheets/wages_nominal.R", local = FALSE)
+            yrs <- input$chart_years
+            append_key_charts_page(
+              file,
+              build_chart_series(input$chart_metrics, yrs[1], yrs[2], "auto",
+                                 build_auto_sources(input$chart_metrics))
+            )
+          }, error = function(e) message("Key Charts page skipped: ", e$message))
+
           incProgress(0.4, detail = "done")
         })
         
@@ -1911,7 +1950,56 @@ server <- function(input, output, session) {
     
     showNotification("Summary generated (Manual Upload)", type = "message", duration = 3)
   })
-  
+
+  # charts preview (configurable Key Charts page) — config inputs shared by both tabs
+  charts_preview_data <- reactiveVal(NULL)
+
+  observeEvent(input$manual_preview_charts, {
+    if (!.check_manual_ready()) return()
+    if (length(input$chart_metrics) == 0) {
+      showNotification("Select at least one metric to chart", type = "warning")
+      return()
+    }
+    withProgress(message = "building charts...", value = 0, {
+      incProgress(0.3, detail = "reading files...")
+      yrs <- input$chart_years
+      series <- tryCatch(
+        build_chart_series(input$chart_metrics, yrs[1], yrs[2], "manual",
+                           list(file_a01 = uploaded_files$a01, file_rtisa = uploaded_files$rtisa)),
+        error = function(e) {
+          showNotification(paste("Charts error:", e$message), type = "error"); NULL
+        })
+      charts_preview_data(series)
+      incProgress(0.7, detail = "done")
+    })
+    showNotification("Charts generated (Manual Upload)", type = "message", duration = 3)
+  })
+
+  observeEvent(input$preview_charts, {
+    if (length(input$chart_metrics) == 0) {
+      showNotification("Select at least one metric to chart", type = "warning")
+      return()
+    }
+    withProgress(message = "building charts...", value = 0, {
+      incProgress(0.3, detail = "querying database...")
+      source("sheets/lfs.R", local = FALSE)
+      source("sheets/payroll.R", local = FALSE)
+      source("sheets/vacancies.R", local = FALSE)
+      source("sheets/redundancy.R", local = FALSE)
+      source("sheets/wages_nominal.R", local = FALSE)
+      yrs <- input$chart_years
+      series <- tryCatch(
+        build_chart_series(input$chart_metrics, yrs[1], yrs[2], "auto",
+                           build_auto_sources(input$chart_metrics)),
+        error = function(e) {
+          showNotification(paste("Charts error:", e$message), type = "error"); NULL
+        })
+      charts_preview_data(series)
+      incProgress(0.7, detail = "done")
+    })
+    showNotification("Charts loaded (Database)", type = "message", duration = 3)
+  })
+
   # manual preview: oecd
   oecd_preview_data <- reactiveVal(NULL)
   
@@ -2158,6 +2246,16 @@ server <- function(input, output, session) {
               contact_names = input$contact_names,
               verbose = FALSE
             )
+            # append the configurable Key Charts page (native editable charts)
+            tryCatch({
+              yrs <- input$chart_years
+              append_key_charts_page(
+                file,
+                build_chart_series(input$chart_metrics, yrs[1], yrs[2], "manual",
+                                   list(file_a01 = uploaded_files$a01,
+                                        file_rtisa = uploaded_files$rtisa))
+              )
+            }, error = function(e) message("Key Charts page skipped: ", e$message))
           } else {
             stop("No Word template found (ManualDB.docx)")
           }
@@ -2360,6 +2458,22 @@ server <- function(input, output, session) {
     tags$ol(class = "top-ten-list", items)
   })
   
+  # render: key charts preview
+  output$charts_preview <- renderPlot({
+    series <- charts_preview_data()
+    if (is.null(series)) {
+      plot.new()
+      text(0.5, 0.5, "Select metrics and a time period, then click ‘Charts’.",
+           col = "grey40")
+      return(invisible())
+    }
+    render_key_charts_preview(series)
+  }, height = function() {
+    series <- charts_preview_data()
+    n <- if (is.null(series)) 0 else length(series)
+    if (n == 0) 360 else 320 * ceiling(n / 2)
+  })
+
   # render: oecd preview
   output$oecd_preview <- renderUI({
     pd <- oecd_preview_data()
