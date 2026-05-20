@@ -285,9 +285,7 @@ build_chart_series <- function(chart_configs, flow, sources) {
       type   = if (is.null(cfg$type) || !nzchar(cfg$type)) md$type else cfg$type,
       colour = md$colour,
       unit   = md$unit,
-      source = md$source,
-      ymin   = if (is.null(cfg$ymin)) NA_real_ else cfg$ymin,
-      ymax   = if (is.null(cfg$ymax)) NA_real_ else cfg$ymax
+      source = md$source
     )
 
     s <- tryCatch(.wc_extract(cfg$id, flow, sources), error = function(e) NULL)
@@ -388,22 +386,6 @@ build_auto_sources <- function(metric_ids) {
   list(cat = cat, val = val, year = year)
 }
 
-# Build the <c:scaling> block for the value axis. Optional ymin/ymax inject
-# <c:min>/<c:max> in schema order; NA on either side means autoscale that side.
-.wc_val_scaling <- function(ymin = NA_real_, ymax = NA_real_) {
-  if (is.null(ymin)) ymin <- NA_real_
-  if (is.null(ymax)) ymax <- NA_real_
-  if (!is.na(ymin) && !is.na(ymax) && ymin >= ymax) {
-    warning("ymin >= ymax; falling back to autoscale")
-    ymin <- NA_real_; ymax <- NA_real_
-  }
-  parts <- c('<c:scaling>', '<c:orientation val="minMax"/>')
-  if (!is.na(ymax)) parts <- c(parts, sprintf('<c:max val="%s"/>', .wc_num1(ymax)))
-  if (!is.na(ymin)) parts <- c(parts, sprintf('<c:min val="%s"/>', .wc_num1(ymin)))
-  parts <- c(parts, '</c:scaling>')
-  paste(parts, collapse = "")
-}
-
 
 # ---- chart XML templates (inlined to avoid committing .xml files) ----
 .WC_LINE_TEMPLATE <- r"----(<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -413,19 +395,6 @@ build_auto_sources <- function(metric_ids) {
 
 # Post-template transforms (keep the raw strings above byte-identical to the
 # source-of-truth chart XML; mutations happen here at source-load time).
-
-# Inject a __VAL_SCALING__ token into the valAx scaling of a template so
-# build_chart_xml() can substitute user min/max at render time. The catAx
-# scaling stays literal; we target the post-<c:valAx> region only.
-.wc_inject_val_scaling <- function(tmpl) {
-  parts <- strsplit(tmpl, "<c:valAx>", fixed = TRUE)[[1]]
-  if (length(parts) < 2) return(tmpl)
-  parts[2] <- sub('<c:scaling><c:orientation val="minMax"/></c:scaling>',
-                  '__VAL_SCALING__', parts[2], fixed = TRUE)
-  paste(parts, collapse = "<c:valAx>")
-}
-.WC_LINE_TEMPLATE <- .wc_inject_val_scaling(.WC_LINE_TEMPLATE)
-.WC_BAR_TEMPLATE  <- .wc_inject_val_scaling(.WC_BAR_TEMPLATE)
 
 # Bar template originally has no <c:tx> in its <c:ser>; add one so the
 # (possibly smoothing-suffixed) label appears as the internal series name too.
@@ -460,7 +429,6 @@ build_chart_xml <- function(chart) {
   out <- gsub("__SERIES_COLOUR__", chart$colour,                                out, fixed = TRUE)
   out <- gsub("__CAT_CACHE__",     .wc_cat_cache(chart$cat),                    out, fixed = TRUE)
   out <- gsub("__VAL_CACHE__",     .wc_val_cache(chart$val),                    out, fixed = TRUE)
-  out <- gsub("__VAL_SCALING__",   .wc_val_scaling(chart$ymin, chart$ymax),     out, fixed = TRUE)
   out
 }
 

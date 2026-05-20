@@ -549,6 +549,9 @@ ui <- fluidPage(
                                              actionButton("manual_preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
+                                             actionButton("manual_jump_charts", "Charts",
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "document.getElementById('charts_card').scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -597,6 +600,9 @@ ui <- fluidPage(
                                              actionButton("preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
+                                             actionButton("auto_jump_charts", "Charts",
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "document.getElementById('charts_card').scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -629,7 +635,7 @@ ui <- fluidPage(
                     div(class = "dashboard-card__header", "OECD International Comparisons"),
                     div(class = "dashboard-card__content preview-scroll", uiOutput("oecd_preview"))
                 ),
-                div(class = "dashboard-card",
+                div(class = "dashboard-card", id = "charts_card",
                     div(class = "dashboard-card__header", "Key Charts Preview"),
                     div(class = "dashboard-card__content",
                         # Quick presets — apply From/To to every currently-ticked chart.
@@ -1994,11 +2000,7 @@ server <- function(input, output, session) {
                                 choices = yrs, selected = as.character(cur_yr), width = "100%")),
                 div(style = "min-width:170px;",
                     selectInput(paste0("chart_", id, "_smoothing"), "Smoothing",
-                                choices = smooth_choices, selected = "raw", width = "100%")),
-                div(style = "min-width:100px;",
-                    numericInput(paste0("chart_", id, "_ymin"), "Y-min", value = NA, width = "100%")),
-                div(style = "min-width:100px;",
-                    numericInput(paste0("chart_", id, "_ymax"), "Y-max", value = NA, width = "100%")))))
+                                choices = smooth_choices, selected = "raw", width = "100%")))))
     })
     do.call(tagList, rows)
   })
@@ -2013,9 +2015,7 @@ server <- function(input, output, session) {
         type      = input[[paste0("chart_", m$id, "_type")]] %||% m$type,
         year_from = suppressWarnings(as.integer(input[[paste0("chart_", m$id, "_from")]])),
         year_to   = suppressWarnings(as.integer(input[[paste0("chart_", m$id, "_to")]])),
-        smoothing = input[[paste0("chart_", m$id, "_smoothing")]] %||% "raw",
-        ymin      = suppressWarnings(as.numeric(input[[paste0("chart_", m$id, "_ymin")]])),
-        ymax      = suppressWarnings(as.numeric(input[[paste0("chart_", m$id, "_ymax")]]))
+        smoothing = input[[paste0("chart_", m$id, "_smoothing")]] %||% "raw"
       )
     }
     configs
@@ -2026,8 +2026,6 @@ server <- function(input, output, session) {
     for (c in configs) {
       if (is.na(c$year_from) || is.na(c$year_to) || c$year_from > c$year_to)
         errs <- c(errs, paste0("Invalid From/To for ", c$id))
-      if (!is.na(c$ymin) && !is.na(c$ymax) && c$ymin >= c$ymax)
-        errs <- c(errs, paste0("Y-min must be < Y-max for ", c$id))
     }
     errs
   }
