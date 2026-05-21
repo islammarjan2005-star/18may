@@ -573,3 +573,104 @@ append_custom_indicators <- function(docx_path, body_fragment) {
   zip::zip(zipfile = out_abs, files = list.files(tmp), root = tmp)
   invisible(docx_path)
 }
+
+# ---- audit-workbook data --------------------------------------------------
+
+# Build the data the Excel audit workbook needs for its Custom Indicators
+# sheets. Returns numeric values (not formatted strings) so the workbook can
+# apply its own number formats and stay sortable/filterable.
+#   grid       one row per (series x comparison): CDID, Title, Unit, Frequency,
+#              Comparison, Latest period, Latest value, Comparison period,
+#              Comparison value, Change, In briefing.
+#   grid_rate  per-grid-row logical: is the series a rate? (drives number fmt)
+#   data       long full series: CDID, Title, Frequency, Period, Value.
+#   data_rate  per-data-row logical.
+#   lines      the summary-line texts that are included (after line_keys filter).
+#   provenance one-line source note.
+build_custom_audit <- function(selections, catalog, periods, path, line_keys = NULL) {
+  flab <- c(M = "Monthly", Q = "Quarterly", A = "Annual")
+
+  g_cdid <- character(0); g_title <- character(0); g_unit <- character(0)
+  g_freq <- character(0); g_comp  <- character(0); g_lper <- character(0)
+  g_lval <- numeric(0);   g_bper  <- character(0); g_bval <- numeric(0)
+  g_chg  <- numeric(0);   g_brief <- character(0); g_rate <- logical(0)
+
+  d_cdid <- character(0); d_title <- character(0); d_freq <- character(0)
+  d_per  <- character(0); d_val   <- numeric(0);   d_rate <- logical(0)
+
+  push_grid <- function(cdid, title, unit, freq, comp, lper, lval,
+                        bper, bval, chg, brief, rate) {
+    g_cdid  <<- c(g_cdid, cdid);  g_title <<- c(g_title, title)
+    g_unit  <<- c(g_unit, unit);  g_freq  <<- c(g_freq, freq)
+    g_comp  <<- c(g_comp, comp);  g_lper  <<- c(g_lper, lper)
+    g_lval  <<- c(g_lval, lval);  g_bper  <<- c(g_bper, bper)
+    g_bval  <<- c(g_bval, bval);  g_chg   <<- c(g_chg, chg)
+    g_brief <<- c(g_brief, brief); g_rate <<- c(g_rate, rate)
+  }
+
+  for (sel in selections) {
+    crow <- catalog[catalog$cdid == sel$cdid, , drop = FALSE]
+    if (nrow(crow) == 0L) next
+    is_rate <- .lms_is_rate(crow)
+    unit    <- .lms_unit_label(crow)
+    fl      <- flab[[sel$freq]]
+    series  <- lms_series(catalog, periods, path, sel$cdid, sel$freq)
+
+    if (is.null(series) || nrow(series) == 0L) {
+      push_grid(sel$cdid, crow$title, unit, fl, "(no data)",
+                NA_character_, NA_real_, NA_character_, NA_real_, NA_real_, "n/a", is_rate)
+      next
+    }
+
+    # full series -> data sheet
+    n <- nrow(series)
+    d_cdid <- c(d_cdid, rep(sel$cdid, n)); d_title <- c(d_title, rep(crow$title, n))
+    d_freq <- c(d_freq, rep(fl, n));       d_per   <- c(d_per, series$period_label)
+    d_val  <- c(d_val, series$value);      d_rate  <- c(d_rate, rep(is_rate, n))
+
+    latest_per <- series$period_label[n]; latest_val <- series$value[n]
+    bls <- setdiff(sel$baselines, "current")
+    bls <- Filter(function(b) sel$freq %in% LMS_BASELINES[[b]]$applies, bls)
+
+    if (length(bls) == 0L) {
+      push_grid(sel$cdid, crow$title, unit, fl, "Latest",
+                latest_per, latest_val, NA_character_, NA_real_, NA_real_, "", is_rate)
+      next
+    }
+    for (b in bls) {
+      base <- lms_baseline_value(series, sel$freq, b, crow)
+      chg  <- if (is.na(base$value)) NA_real_ else latest_val - base$value
+      key  <- paste0(sel$cdid, "|", b)
+      brief <- if (is.na(chg)) "n/a"
+               else if (is.null(line_keys) || key %in% line_keys) "Yes" else "No"
+      push_grid(sel$cdid, crow$title, unit, fl, LMS_BASELINES[[b]]$label,
+                latest_per, latest_val, base$period_label, base$value, chg, brief, is_rate)
+    }
+  }
+
+  grid <- data.frame(
+    CDID = g_cdid, Title = g_title, Unit = g_unit, Frequency = g_freq,
+    Comparison = g_comp, `Latest period` = g_lper, `Latest value` = g_lval,
+    `Comparison period` = g_bper, `Comparison value` = g_bval,
+    Change = g_chg, `In briefing` = g_brief,
+    check.names = FALSE, stringsAsFactors = FALSE)
+
+  data_df <- data.frame(
+    CDID = d_cdid, Title = d_title, Frequency = d_freq,
+    Period = d_per, Value = d_val,
+    check.names = FALSE, stringsAsFactors = FALSE)
+
+  recs <- lms_summary_lines(selections, catalog, periods, path)
+  if (!is.null(line_keys)) recs <- Filter(function(r) r$key %in% line_keys, recs)
+  lines <- vapply(recs, `[[`, "", "text")
+
+  rel <- if (nrow(catalog) > 0 && nzchar(catalog$release[1])) catalog$release[1] else "n/a"
+
+  list(grid = grid, grid_rate = g_rate,
+       data = data_df, data_rate = d_rate,
+       lines = lines,
+       provenance = paste0(
+         "Source: ONS Labour Market Statistics time-series (LMS), CDID-referenced. ",
+         "Every figure traces to the uploaded LMS file -> CDID -> period. ",
+         "LMS release: ", rel, "."))
+}

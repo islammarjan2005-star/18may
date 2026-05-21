@@ -1851,6 +1851,24 @@ server <- function(input, output, session) {
           pay_mode <- auto_selected_pay_period()
           month_override <- mm
           tmp_xlsx <- tempfile(fileext = ".xlsx")
+
+          # build the LMS custom-indicators audit sheets from the analyst's
+          # current selection (same per-line checkboxes as the Word briefing)
+          lms_aud <- NULL
+          tryCatch({
+            sels <- lms_selections_data(); cd <- lms_catalog_data()
+            if (!is.null(sels) && length(sels) > 0L && !is.null(cd)) {
+              recs <- lms_summary_lines(sels, cd$catalog, cd$periods, cd$path)
+              keep <- vapply(recs, function(rec) {
+                v <- input[[paste0("lms_line_", rec$cdid, "_", rec$baseline)]]
+                is.null(v) || isTRUE(v)
+              }, logical(1))
+              keys <- vapply(recs[keep], `[[`, "", "key")
+              lms_aud <- build_custom_audit(sels, cd$catalog, cd$periods, cd$path,
+                                            line_keys = keys)
+            }
+          }, error = function(e) message("LMS audit sheets skipped: ", e$message))
+
           excel_env$create_audit_workbook(
             output_path = tmp_xlsx,
             file_a01 = uploaded_files$a01,
@@ -1867,6 +1885,7 @@ server <- function(input, output, session) {
             vacancies_mode = vac_mode,
             payroll_mode = pay_mode,
             manual_month_override = month_override,
+            lms_audit = lms_aud,
             verbose = FALSE
           )
           
@@ -2602,6 +2621,24 @@ server <- function(input, output, session) {
           excel_env <- new.env(parent = globalenv())
           source(excel_script_path, local = excel_env)
           tmp_xlsx <- tempfile(fileext = ".xlsx")
+
+          # build the LMS custom-indicators audit sheets from the analyst's
+          # current selection (same per-line checkboxes as the Word briefing)
+          lms_aud <- NULL
+          tryCatch({
+            sels <- lms_selections_data(); cd <- lms_catalog_data()
+            if (!is.null(sels) && length(sels) > 0L && !is.null(cd)) {
+              recs <- lms_summary_lines(sels, cd$catalog, cd$periods, cd$path)
+              keep <- vapply(recs, function(rec) {
+                v <- input[[paste0("lms_line_", rec$cdid, "_", rec$baseline)]]
+                is.null(v) || isTRUE(v)
+              }, logical(1))
+              keys <- vapply(recs[keep], `[[`, "", "key")
+              lms_aud <- build_custom_audit(sels, cd$catalog, cd$periods, cd$path,
+                                            line_keys = keys)
+            }
+          }, error = function(e) message("LMS audit sheets skipped: ", e$message))
+
           excel_env$create_audit_workbook(
             output_path = tmp_xlsx,
             file_a01 = uploaded_files$a01,
@@ -2617,6 +2654,7 @@ server <- function(input, output, session) {
             config_path = config_path,
             vacancies_mode = selected_vac_period(),
             payroll_mode = selected_pay_period(),
+            lms_audit = lms_aud,
             verbose = FALSE
           )
           
