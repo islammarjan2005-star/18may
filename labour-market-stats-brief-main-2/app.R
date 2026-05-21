@@ -1770,7 +1770,14 @@ server <- function(input, output, session) {
           tryCatch({
             sels <- lms_selections_data(); cd <- lms_catalog_data()
             if (!is.null(sels) && length(sels) > 0L && !is.null(cd)) {
-              frag <- build_custom_indicators_xml(sels, cd$catalog, cd$periods, cd$path)
+              recs <- lms_summary_lines(sels, cd$catalog, cd$periods, cd$path)
+              keep <- vapply(recs, function(rec) {
+                v <- input[[paste0("lms_line_", rec$cdid, "_", rec$baseline)]]
+                is.null(v) || isTRUE(v)
+              }, logical(1))
+              keys <- vapply(recs[keep], `[[`, "", "key")
+              frag <- build_custom_indicators_xml(sels, cd$catalog, cd$periods, cd$path,
+                                                  line_keys = keys)
               if (nzchar(frag)) append_custom_indicators(file, frag)
             }
           }, error = function(e) message("Custom indicators skipped: ", e$message))
@@ -2215,10 +2222,7 @@ server <- function(input, output, session) {
               div(style = "min-width:300px;",
                   checkboxGroupInput(paste0("lms_", cdid, "_baselines"), "Baselines",
                                      choices = bl_choices, selected = names(bl_choices),
-                                     inline = TRUE)),
-              div(style = "min-width:140px;",
-                  checkboxInput(paste0("lms_", cdid, "_summary"),
-                                "Include summary line", value = TRUE))))
+                                     inline = TRUE))))
     })
     do.call(tagList, Filter(Negate(is.null), rows))
   })
@@ -2239,14 +2243,13 @@ server <- function(input, output, session) {
       if (nrow(row) == 0L) next
       freq <- input[[paste0("lms_", cdid, "_freq")]]
       bls  <- input[[paste0("lms_", cdid, "_baselines")]]
-      summ <- isTRUE(input[[paste0("lms_", cdid, "_summary")]])
       if (is.null(freq) || length(bls) == 0L) next
       # drop baselines not applicable to chosen frequency
       bls_keep <- vapply(bls, function(b) freq %in% LMS_BASELINES[[b]]$applies, logical(1))
       bls <- bls[bls_keep]
       sels[[length(sels) + 1L]] <- list(
         cdid = cdid, title = row$title, unit = row$unit, pre_unit = row$pre_unit,
-        freq = freq, baselines = bls, summary = summ, catalog_row = row)
+        freq = freq, baselines = bls, catalog_row = row)
     }
     if (length(sels) == 0L) {
       lms_selections_data(NULL); lms_table_preview_data(NULL)
@@ -2513,7 +2516,14 @@ server <- function(input, output, session) {
             tryCatch({
               sels <- lms_selections_data(); cd <- lms_catalog_data()
               if (!is.null(sels) && length(sels) > 0L && !is.null(cd)) {
-                frag <- build_custom_indicators_xml(sels, cd$catalog, cd$periods, cd$path)
+                recs <- lms_summary_lines(sels, cd$catalog, cd$periods, cd$path)
+                keep <- vapply(recs, function(rec) {
+                  v <- input[[paste0("lms_line_", rec$cdid, "_", rec$baseline)]]
+                  is.null(v) || isTRUE(v)
+                }, logical(1))
+                keys <- vapply(recs[keep], `[[`, "", "key")
+                frag <- build_custom_indicators_xml(sels, cd$catalog, cd$periods, cd$path,
+                                                    line_keys = keys)
                 if (nzchar(frag)) append_custom_indicators(file, frag)
               }
             }, error = function(e) message("Custom indicators skipped: ", e$message))
@@ -2768,28 +2778,15 @@ server <- function(input, output, session) {
     if (is.null(sels) || length(sels) == 0L || is.null(cd)) {
       return(div(class = "govuk-hint", "No summary lines."))
     }
-    lines <- character(0)
-    for (sel in sels) {
-      if (!isTRUE(sel$summary)) next
-      crow <- cd$catalog[cd$catalog$cdid == sel$cdid, , drop = FALSE]
-      if (nrow(crow) == 0L) next
-      series <- lms_series(cd$catalog, cd$periods, cd$path, sel$cdid, sel$freq)
-      if (is.null(series) || nrow(series) == 0L) next
-      latest <- list(date = series$date[nrow(series)],
-                     value = series$value[nrow(series)],
-                     period_label = series$period_label[nrow(series)])
-      for (b in setdiff(sel$baselines, "current")) {
-        spec <- LMS_BASELINES[[b]]
-        if (is.null(spec) || !sel$freq %in% spec$applies) next
-        base <- lms_baseline_value(series, sel$freq, b, crow)
-        if (is.na(base$value)) next
-        line <- format_summary_line(crow, b, latest, base, sel$freq)
-        if (nzchar(line)) lines <- c(lines, line)
-      }
-    }
-    if (length(lines) == 0L) return(div(class = "govuk-hint", "No summary lines."))
-    tags$ul(style = "font-size:13px; line-height:1.5;",
-            lapply(lines, function(x) tags$li(x)))
+    recs <- lms_summary_lines(sels, cd$catalog, cd$periods, cd$path)
+    if (length(recs) == 0L) return(div(class = "govuk-hint", "No summary lines."))
+    # One checkbox per generated line; ticked lines go into the Word briefing.
+    tagList(
+      div(class = "govuk-hint", style = "margin-bottom:6px;",
+          "Tick the lines to include in the Word briefing."),
+      lapply(recs, function(rec)
+        checkboxInput(paste0("lms_line_", rec$cdid, "_", rec$baseline),
+                      label = rec$text, value = TRUE)))
   })
 
   # render: oecd preview

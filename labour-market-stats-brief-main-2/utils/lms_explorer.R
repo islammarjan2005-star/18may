@@ -427,24 +427,12 @@ build_custom_preview_df <- function(selections, catalog, periods, path) {
 
 # ---- Word OOXML body fragment ----------------------------------------------
 
-# Build the body fragment to splice in. No new parts; no relationships; no
-# content-type changes \u2014 pure WordprocessingML body content.
-build_custom_indicators_xml <- function(selections, catalog, periods, path) {
-  if (length(selections) == 0L) return("")
-  esc <- .wc_xml_escape
-
-  # Page break + heading
-  pagebreak <- '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
-  heading <- paste0(
-    '<w:p><w:pPr><w:spacing w:before="120" w:after="160"/></w:pPr>',
-    '<w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr>',
-    '<w:t>Custom indicators</w:t></w:r></w:p>')
-
-  # Bullet paragraphs (one per series x ticked baseline yielding a usable \u0394).
-  # Use a literal "\u2022" glyph to avoid any numbering.xml dependency.
-  bullets <- character(0)
+# Generate the candidate summary lines for a set of selections. Returns a list
+# of records: list(key, cdid, baseline, text). `key` = "<cdid>|<baseline>" \u2014 a
+# stable id used to tie each line to its per-line include checkbox.
+lms_summary_lines <- function(selections, catalog, periods, path) {
+  out <- list()
   for (sel in selections) {
-    if (!isTRUE(sel$summary)) next
     crow <- catalog[catalog$cdid == sel$cdid, , drop = FALSE]
     if (nrow(crow) == 0L) next
     series <- lms_series(catalog, periods, path, sel$cdid, sel$freq)
@@ -459,15 +447,41 @@ build_custom_indicators_xml <- function(selections, catalog, periods, path) {
       if (is.na(base$value)) next
       line <- format_summary_line(crow, b, latest, base, sel$freq)
       if (!nzchar(line)) next
-      bullets <- c(bullets, paste0(
-        '<w:p><w:pPr><w:ind w:left="360" w:hanging="200"/>',
-        '<w:spacing w:before="40" w:after="40"/></w:pPr>',
-        '<w:r><w:rPr><w:sz w:val="22"/></w:rPr>',
-        '<w:t xml:space="preserve">\u2022  </w:t></w:r>',
-        '<w:r><w:rPr><w:sz w:val="22"/></w:rPr>',
-        '<w:t xml:space="preserve">', esc(line), '</w:t></w:r></w:p>'))
+      out[[length(out) + 1L]] <- list(
+        key = paste0(sel$cdid, "|", b), cdid = sel$cdid,
+        baseline = b, text = line)
     }
   }
+  out
+}
+
+# Build the body fragment to splice in. No new parts; no relationships; no
+# content-type changes \u2014 pure WordprocessingML body content. `line_keys`, when
+# non-NULL, restricts the bullet list to those summary-line keys (from
+# lms_summary_lines); NULL includes every line.
+build_custom_indicators_xml <- function(selections, catalog, periods, path,
+                                        line_keys = NULL) {
+  if (length(selections) == 0L) return("")
+  esc <- .wc_xml_escape
+
+  # Page break + heading
+  pagebreak <- '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+  heading <- paste0(
+    '<w:p><w:pPr><w:spacing w:before="120" w:after="160"/></w:pPr>',
+    '<w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr>',
+    '<w:t>Custom indicators</w:t></w:r></w:p>')
+
+  # Bullet paragraphs \u2014 one per included summary line. Use the "\u2022" glyph
+  # to avoid any numbering.xml dependency.
+  recs <- lms_summary_lines(selections, catalog, periods, path)
+  if (!is.null(line_keys)) recs <- Filter(function(r) r$key %in% line_keys, recs)
+  bullets <- vapply(recs, function(rec) paste0(
+    '<w:p><w:pPr><w:ind w:left="360" w:hanging="200"/>',
+    '<w:spacing w:before="40" w:after="40"/></w:pPr>',
+    '<w:r><w:rPr><w:sz w:val="22"/></w:rPr>',
+    '<w:t xml:space="preserve">\u2022  </w:t></w:r>',
+    '<w:r><w:rPr><w:sz w:val="22"/></w:rPr>',
+    '<w:t xml:space="preserve">', esc(rec$text), '</w:t></w:r></w:p>'), "")
 
   # Comparison table \u2014 same columns as the preview df.
   df <- build_custom_preview_df(selections, catalog, periods, path)
