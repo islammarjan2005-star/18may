@@ -18,13 +18,14 @@ LMS_BASELINES <- list(
                   offset_months = -3L),
   year     = list(id = "year",     label = "On the year",      applies = c("M","Q","A"),
                   offset_months = -12L),
-  # Covid baseline = the pre-pandemic LFS quarter, Dec 2019-Feb 2020. It exists
-  # directly at LFS frequencies: monthly "Feb 2020" and quarterly "Dec-Feb 2020"
-  # (the Q1 2020 row), both end-Feb 2020. Annual data has no Dec-Feb point, so it
-  # falls back to the last pre-pandemic full year, 2019.
+  # Covid baseline = the pre-pandemic LFS quarter, Dec 2019-Feb 2020. The monthly
+  # series is a 3-month rolling figure labelled by its MIDDLE month, so that
+  # quarter is the "Jan 2020" point (Dec-Jan-Feb). .lms_covid_base resolves it
+  # from the monthly series at every frequency; the Q/A anchors are only a
+  # fallback for series that have no monthly data.
   precovid = list(id = "precovid", label = "Since Covid",      applies = c("M","Q","A"),
-                  anchor = c(M = as.Date("2020-02-29"),
-                             Q = as.Date("2020-02-29"),
+                  anchor = c(M = as.Date("2020-01-31"),
+                             Q = as.Date("2019-12-31"),
                              A = as.Date("2019-12-31"))),
   election = list(id = "election", label = "Since election",   applies = c("M","Q","A"),
                   anchor = as.Date("2024-07-31"))
@@ -64,10 +65,12 @@ LMS_BASELINES <- list(
 }
 
 # Classify a single period label and return its end-of-period Date plus a
-# friendly display string. LMS quarters are ONS LFS seasonal quarters
-# (Q1=Dec-Feb, Q2=Mar-May, Q3=Jun-Aug, Q4=Sep-Nov), labelled by their END
-# year, so "2020 Q1" -> "Dec-Feb 2020" (spanning Dec 2019 - Feb 2020). Months
-# render as "Mmm YYYY" ("2026 MAR" -> "Mar 2026"); annuals stay as the year.
+# friendly display string. LMS quarters are calendar quarters (Q1=Jan-Mar ...
+# Q4=Oct-Dec). The monthly series is a 3-month rolling figure labelled by its
+# MIDDLE month, so monthly "Feb 2020" is the Jan-Mar 2020 quarter and monthly
+# "Jan 2020" is the Dec-Feb 2020 (Covid) quarter. Quarters render as
+# "Mmm-Mmm YYYY" ("2020 Q1" -> "Jan-Mar 2020"); months as "Mmm YYYY"; annuals
+# as the bare year.
 .lms_classify_period <- function(label) {
   na_out <- list(freq = NA_character_, date = as.Date(NA), display = NA_character_)
   if (is.na(label) || !nzchar(label)) return(na_out)
@@ -79,10 +82,10 @@ LMS_BASELINES <- list(
   m <- regmatches(s, regexec("^(\\d{4})\\s*Q([1-4])$", s))[[1]]
   if (length(m) == 3L) {
     yr <- as.integer(m[2]); q <- as.integer(m[3])
-    end_mo   <- q * 3L - 1L            # Feb, May, Aug, Nov
-    start_mo <- end_mo - 2L            # Dec(prev yr), Mar, Jun, Sep
-    start_nm <- .LMS_MONTH_NAMES_SHORT[if (start_mo <= 0L) start_mo + 12L else start_mo]
-    disp <- sprintf("%s-%s %d", start_nm, .LMS_MONTH_NAMES_SHORT[end_mo], yr)
+    end_mo   <- q * 3L                 # Mar, Jun, Sep, Dec
+    start_mo <- end_mo - 2L            # Jan, Apr, Jul, Oct
+    disp <- sprintf("%s-%s %d", .LMS_MONTH_NAMES_SHORT[start_mo],
+                    .LMS_MONTH_NAMES_SHORT[end_mo], yr)
     return(list(freq = "Q",
                 date = .lms_last_day_of_offset_month(
                   as.Date(sprintf("%04d-%02d-01", yr, end_mo)), 0L),
