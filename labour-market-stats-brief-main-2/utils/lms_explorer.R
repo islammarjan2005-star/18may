@@ -6,7 +6,7 @@
 # ---- baseline registry ------------------------------------------------------
 # Six entries. `applies` says which frequencies a baseline is valid for.
 # `offset_months` is used for month/quarter/year baselines (uniformly in months
-# so end-of-month arithmetic always works). Anchored baselines (pre-COVID,
+# so end-of-month arithmetic always works). Anchored baselines (Covid,
 # election) hold a fixed Date.
 
 LMS_BASELINES <- list(
@@ -18,8 +18,15 @@ LMS_BASELINES <- list(
                   offset_months = -3L),
   year     = list(id = "year",     label = "On the year",      applies = c("M","Q","A"),
                   offset_months = -12L),
-  precovid = list(id = "precovid", label = "Since pre-COVID",  applies = c("M","Q","A"),
-                  anchor = as.Date("2020-02-29")),
+  # Covid baseline = the pre-pandemic LFS quarter, Dec 2019-Feb 2020. LMS
+  # monthly LFS series are 3-month rolling figures labelled by their end month,
+  # so "Feb 2020" already IS that quarter. LMS quarterly data is calendar-based
+  # (no Dec-Feb quarter exists), so it uses the last clean pre-pandemic quarter,
+  # Oct-Dec 2019. (Jan-Mar 2020 is a vacancies-only convention and not used here.)
+  precovid = list(id = "precovid", label = "Since Covid",      applies = c("M","Q","A"),
+                  anchor = c(M = as.Date("2020-02-29"),
+                             Q = as.Date("2019-12-31"),
+                             A = as.Date("2019-12-31"))),
   election = list(id = "election", label = "Since election",   applies = c("M","Q","A"),
                   anchor = as.Date("2024-07-31"))
 )
@@ -276,8 +283,10 @@ lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL) {
                 period_label = series$period_label[nrow(series)]))
   }
 
-  target <- if (!is.null(spec$anchor)) spec$anchor
-            else .lms_last_day_of_offset_month(latest_date, spec$offset_months)
+  target <- if (!is.null(spec$anchor)) {
+              a <- spec$anchor
+              if (!is.null(names(a)) && freq %in% names(a)) a[[freq]] else a[[1]]
+            } else .lms_last_day_of_offset_month(latest_date, spec$offset_months)
 
   diffs <- abs(as.integer(series$date - target))
   nearest <- which.min(diffs)
@@ -331,7 +340,7 @@ lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL) {
          month    = "on the month",
          quarter  = "on the quarter",
          year     = "on the year",
-         precovid = "since pre-COVID",
+         precovid = "since Covid",
          election = "since the general election",
          "vs baseline")
 }
