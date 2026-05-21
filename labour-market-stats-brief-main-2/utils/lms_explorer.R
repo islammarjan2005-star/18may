@@ -28,6 +28,8 @@ LMS_BASELINES <- list(
                     JUL=7, AUG=8, SEP=9, OCT=10, NOV=11, DEC=12)
 .LMS_MONTH_NAMES_LONG <- c("January","February","March","April","May","June",
                            "July","August","September","October","November","December")
+.LMS_MONTH_NAMES_SHORT <- c("Jan","Feb","Mar","Apr","May","Jun",
+                            "Jul","Aug","Sep","Oct","Nov","Dec")
 
 # ---- small helpers ----------------------------------------------------------
 
@@ -55,29 +57,39 @@ LMS_BASELINES <- list(
   as.Date(next_mo) - 1L
 }
 
-# Classify a single period label and return its end-of-period Date.
+# Classify a single period label and return its end-of-period Date plus a
+# friendly display string. Quarters are rewritten as "Mmm-Mmm YYYY" (e.g.
+# "1959 Q2" -> "Apr-Jun 1959") and months as "Mmm YYYY" ("2026 MAR" ->
+# "Mar 2026"); annuals stay as the bare year.
 .lms_classify_period <- function(label) {
-  na_out <- list(freq = NA_character_, date = as.Date(NA))
+  na_out <- list(freq = NA_character_, date = as.Date(NA), display = NA_character_)
   if (is.na(label) || !nzchar(label)) return(na_out)
   s <- trimws(as.character(label))
 
   if (grepl("^\\d{4}$", s)) {
-    return(list(freq = "A", date = as.Date(sprintf("%s-12-31", s))))
+    return(list(freq = "A", date = as.Date(sprintf("%s-12-31", s)), display = s))
   }
   m <- regmatches(s, regexec("^(\\d{4})\\s*Q([1-4])$", s))[[1]]
   if (length(m) == 3L) {
     yr <- as.integer(m[2]); q <- as.integer(m[3])
-    end_mo <- q * 3L
+    end_mo   <- q * 3L
+    start_mo <- end_mo - 2L
+    disp <- sprintf("%s-%s %d",
+                    .LMS_MONTH_NAMES_SHORT[start_mo],
+                    .LMS_MONTH_NAMES_SHORT[end_mo],
+                    yr)
     return(list(freq = "Q",
                 date = .lms_last_day_of_offset_month(
-                  as.Date(sprintf("%04d-%02d-01", yr, end_mo)), 0L)))
+                  as.Date(sprintf("%04d-%02d-01", yr, end_mo)), 0L),
+                display = disp))
   }
   m <- regmatches(s, regexec("^(\\d{4})\\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)$", s))[[1]]
   if (length(m) == 3L) {
     yr <- as.integer(m[2]); mo <- .LMS_MONTH_LUT[[m[3]]]
     return(list(freq = "M",
                 date = .lms_last_day_of_offset_month(
-                  as.Date(sprintf("%04d-%02d-01", yr, mo)), 0L)))
+                  as.Date(sprintf("%04d-%02d-01", yr, mo)), 0L),
+                display = sprintf("%s %d", .LMS_MONTH_NAMES_SHORT[mo], yr)))
   }
   na_out
 }
@@ -157,10 +169,11 @@ parse_lms_catalog <- function(path) {
     return(out)
   }
 
-  labels <- trimws(as.character(col_a[[1]]))
-  n_rows <- length(labels)
-  freqs  <- character(n_rows)
-  dates  <- as.Date(rep(NA, n_rows))
+  labels   <- trimws(as.character(col_a[[1]]))
+  n_rows   <- length(labels)
+  freqs    <- character(n_rows)
+  displays <- character(n_rows)
+  dates    <- as.Date(rep(NA, n_rows))
   unmatched <- integer(0)
   for (r in 8:n_rows) {
     lab <- labels[r]
@@ -169,15 +182,16 @@ parse_lms_catalog <- function(path) {
     if (is.na(cls$freq)) {
       unmatched <- c(unmatched, r)
     } else {
-      freqs[r] <- cls$freq
-      dates[r] <- cls$date
+      freqs[r]    <- cls$freq
+      dates[r]    <- cls$date
+      displays[r] <- cls$display
     }
   }
 
   keep <- nzchar(freqs)
   periods <- data.frame(
     row   = which(keep),
-    label = labels[keep],
+    label = displays[keep],
     freq  = freqs[keep],
     date  = dates[keep],
     stringsAsFactors = FALSE)
