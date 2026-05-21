@@ -1,5 +1,9 @@
 library(shiny)
 
+# Raise upload cap from Shiny's 5 MB default — the ONS LMS bulk time-series
+# file is ~10 MB and may grow over time. 100 MB headroom covers all inputs.
+options(shiny.maxRequestSize = 100 * 1024^2)
+
 source("utils/word_charts.R")
 source("utils/lms_explorer.R")
 
