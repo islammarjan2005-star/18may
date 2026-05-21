@@ -2231,20 +2231,46 @@ server <- function(input, output, session) {
       avail <- .lms_avail_freqs(cd, cdid)
       if (length(avail) == 0L) avail <- c("M","Q","A")  # graceful: show all if none
       freq_choices <- setNames(avail, c(M="Monthly", Q="Quarterly", A="Annual")[avail])
+      default_freq <- if ("Q" %in% avail) "Q" else avail[1]  # prefer quarterly
       div(style = "border-bottom:1px solid #e3e3e3; padding:10px 0;",
           tags$strong(cdid), " | ", crow$title,
           div(style = "display:flex; flex-wrap:wrap; gap:10px; padding-left:8px; margin-top:6px;",
               div(style = "min-width:140px;",
                   selectInput(paste0("lms_", cdid, "_freq"), "Frequency",
-                              choices = freq_choices, selected = avail[1],
+                              choices = freq_choices, selected = default_freq,
                               width = "100%")),
               div(style = "min-width:300px;",
-                  checkboxGroupInput(paste0("lms_", cdid, "_baselines"), "Baselines",
+                  div(style = "display:flex; align-items:center; gap:14px;",
+                      tags$strong("Baselines"),
+                      div(class = "lms-selectall",
+                          checkboxInput(paste0("lms_", cdid, "_bl_all"),
+                                        "Select all", value = TRUE))),
+                  checkboxGroupInput(paste0("lms_", cdid, "_baselines"), label = NULL,
                                      choices = bl_choices, selected = names(bl_choices),
                                      inline = TRUE))))
     })
     do.call(tagList, Filter(Negate(is.null), rows))
   })
+
+  # Wire each per-series "Select all" baselines toggle. Observers are registered
+  # once per CDID (tracked in lms_bl_all_registered) so re-picking a series does
+  # not stack duplicate observers.
+  lms_bl_all_registered <- reactiveVal(character(0))
+  observeEvent(input$lms_pick, {
+    reg <- lms_bl_all_registered()
+    new <- setdiff(input$lms_pick, reg)
+    bl_ids <- names(LMS_BASELINES)[names(LMS_BASELINES) != "current"]
+    for (cdid in new) {
+      local({
+        cc <- cdid
+        observeEvent(input[[paste0("lms_", cc, "_bl_all")]], {
+          sel <- if (isTRUE(input[[paste0("lms_", cc, "_bl_all")]])) bl_ids else character(0)
+          updateCheckboxGroupInput(session, paste0("lms_", cc, "_baselines"), selected = sel)
+        }, ignoreInit = TRUE)
+      })
+    }
+    if (length(new) > 0L) lms_bl_all_registered(c(reg, new))
+  }, ignoreNULL = FALSE)
 
   observeEvent(input$regenerate_custom, {
     cd <- lms_catalog_data()
