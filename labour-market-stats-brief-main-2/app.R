@@ -2232,8 +2232,28 @@ server <- function(input, output, session) {
       if (length(avail) == 0L) avail <- c("M","Q","A")  # graceful: show all if none
       freq_choices <- setNames(avail, c(M="Monthly", Q="Quarterly", A="Annual")[avail])
       default_freq <- if ("Q" %in% avail) "Q" else avail[1]  # prefer quarterly
+
+      # offer to add the rest of this series' breakdown family (industry, age, ...)
+      fam <- tryCatch(lms_series_family(cat0, cdid), error = function(e) NULL)
+      fam_ui <- NULL
+      if (!is.null(fam) && fam$n > 1L) {
+        not_added <- setdiff(fam$cdids, picks)
+        if (length(not_added) > 0L) {
+          preview <- paste(utils::head(fam$variants, 4L), collapse = ", ")
+          if (length(fam$variants) > 4L) preview <- paste0(preview, ", ...")
+          fam_ui <- div(style = "margin:4px 0 2px 8px; font-size:90%; color:#505050;",
+                        tags$span(sprintf("Part of \"%s\" - %d series (%s). ",
+                                          fam$label, fam$n, preview)),
+                        actionButton(paste0("lms_addfam_", cdid),
+                                     sprintf("Add all %d", length(not_added)),
+                                     class = "govuk-button govuk-button--blue",
+                                     style = "padding:2px 10px; font-size:95%; margin-left:6px;"))
+        }
+      }
+
       div(style = "border-bottom:1px solid #e3e3e3; padding:10px 0;",
           tags$strong(cdid), " | ", crow$title,
+          fam_ui,
           div(style = "display:flex; flex-wrap:wrap; gap:10px; padding-left:8px; margin-top:6px;",
               div(style = "min-width:140px;",
                   selectInput(paste0("lms_", cdid, "_freq"), "Frequency",
@@ -2266,6 +2286,19 @@ server <- function(input, output, session) {
         observeEvent(input[[paste0("lms_", cc, "_bl_all")]], {
           sel <- if (isTRUE(input[[paste0("lms_", cc, "_bl_all")]])) bl_ids else character(0)
           updateCheckboxGroupInput(session, paste0("lms_", cc, "_baselines"), selected = sel)
+        }, ignoreInit = TRUE)
+        observeEvent(input[[paste0("lms_addfam_", cc)]], {
+          cdat <- lms_catalog_data(); if (is.null(cdat)) return()
+          fam <- tryCatch(lms_series_family(cdat$catalog, cc), error = function(e) NULL)
+          if (is.null(fam)) return()
+          added <- setdiff(fam$cdids, input$lms_pick)
+          if (length(added) == 0L) return()
+          ch <- setNames(cdat$catalog$cdid,
+                         paste0(cdat$catalog$cdid, " | ", cdat$catalog$title))
+          updateSelectizeInput(session, "lms_pick", choices = ch,
+                               selected = union(input$lms_pick, fam$cdids), server = TRUE)
+          showNotification(sprintf("Added %d series from this breakdown.", length(added)),
+                           type = "message", duration = 3)
         }, ignoreInit = TRUE)
       })
     }

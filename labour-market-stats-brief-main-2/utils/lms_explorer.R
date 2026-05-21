@@ -266,6 +266,55 @@ lms_series <- function(catalog, periods, path, cdid, freq) {
   res
 }
 
+# ---- series families (breakdowns sharing a title stem) ---------------------
+
+.lms_cpfx <- function(a, b) {            # common prefix length, in characters
+  n <- min(nchar(a), nchar(b)); if (n == 0L) return(0L)
+  ca <- utf8ToInt(substr(a, 1L, n)); cb <- utf8ToInt(substr(b, 1L, n))
+  d <- which(ca != cb); if (length(d)) d[1] - 1L else n
+}
+.lms_csfx <- function(a, b)              # common suffix length
+  .lms_cpfx(intToUtf8(rev(utf8ToInt(a))), intToUtf8(rev(utf8ToInt(b))))
+.lms_snap_suf <- function(s, n) {        # pull a suffix length back to a word boundary
+  L <- nchar(s); if (n <= 0L) return(0L)
+  sub <- substr(s, L - n + 1L, L); m <- gregexpr("[ :/)-]", sub)[[1]]
+  if (m[1] == -1L) 0L else (n - min(m) + 1L)
+}
+
+# Detect the "breakdown family" a series belongs to: other series whose titles
+# share the longest stem that ends at a delimiter (" - ", ": ", " by ", " (")
+# and still has >=2 members - e.g. "UK Job Vacancies (thousands) - {industry}".
+# Returns list(label, cdids, variants, n) with the seed first, or NULL.
+lms_series_family <- function(catalog, seed_cdid) {
+  i0 <- which(catalog$cdid == seed_cdid); if (!length(i0)) return(NULL)
+  ttl <- catalog$title[i0[1]]; if (is.na(ttl) || !nzchar(ttl)) return(NULL)
+  titles <- catalog$title
+  cuts <- integer(0)
+  for (pat in c(" - ", ": ", " by ", " \\(")) {
+    ms <- gregexpr(pat, ttl, perl = TRUE)[[1]]
+    if (ms[1] != -1L) cuts <- c(cuts, ms + attr(ms, "match.length") - 1L)
+  }
+  cuts <- sort(unique(cuts[cuts >= 8L & cuts < nchar(ttl)]), decreasing = TRUE)
+  ell <- intToUtf8(0x2026L)
+  for (cp in cuts) {
+    pref <- substr(ttl, 1L, cp)
+    mem <- which(startsWith(titles, pref) & nchar(titles) > cp)
+    if (length(mem) >= 2L) {
+      mt <- titles[mem]; vars <- substr(mt, cp + 1L, nchar(mt))
+      ovs <- if (length(vars) > 1L) min(vapply(vars[-1], function(x) .lms_csfx(vars[1], x), 0L)) else 0L
+      ovs <- .lms_snap_suf(vars[1], ovs)
+      sufx   <- if (ovs > 0L) trimws(substr(vars[1], nchar(vars[1]) - ovs + 1L, nchar(vars[1]))) else ""
+      vshort <- trimws(substr(vars, 1L, nchar(vars) - ovs))
+      stem <- trimws(pref)
+      label <- if (nzchar(sufx)) paste0(stem, " ", ell, " ", sufx) else paste0(stem, " ", ell)
+      ord <- order(mem != i0[1])
+      return(list(label = label, cdids = catalog$cdid[mem][ord],
+                  variants = vshort[ord], n = length(mem)))
+    }
+  }
+  NULL
+}
+
 # ---- baseline lookup --------------------------------------------------------
 
 # Given a (sorted) series and a baseline id, return the (date, value, label)
