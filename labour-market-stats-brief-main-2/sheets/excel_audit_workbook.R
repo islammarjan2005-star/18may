@@ -327,19 +327,29 @@ source("utils/excel_helpers.R", local = FALSE)
 }
 
 # --- LMS custom indicators: audit sheets ---------------------------------
-# lms_audit is the list returned by build_custom_audit():
-#   grid, grid_rate, data, data_rate, lines, provenance
-# Writes two tab-coloured sheets: a comparison grid (one row per
-# series x baseline) and the full source series in long form, so every
-# figure that lands in the Word briefing traces back to a CDID + period.
+# Renders the analyst-selected LMS series the way the workbook's other
+# comparison tables look: a "Custom Indicators" sheet with one row per series
+# (Series | CDID | Frequency | Latest period | Current | Change-per-baseline),
+# navy headers, bold row labels and sign-based green/red on the change cells;
+# plus a "Custom Indicators Data" sheet holding the full source series wide,
+# one block per frequency. lms_audit is the list from build_custom_audit().
 .write_lms_audit_sheets <- function(wb, lms_audit) {
   if (is.null(lms_audit)) return(invisible(NULL))
   grid <- lms_audit$grid
   if (is.null(grid) || nrow(grid) == 0L) return(invisible(NULL))
 
   tab_col <- "#7B005B"
+  bullet  <- intToUtf8(0x2022L)
+  pct_lit <- createStyle(numFmt = "0.0\"%\"")   # rate values are already in percent
+  ctr     <- createStyle(halign = "center")
 
-  # blue divider tab to match the other section separators
+  fmt_for <- function(kind, change) {
+    if (kind == "rate") return(if (change) .pp_fmt() else pct_lit)
+    if (kind == "gbp")  return(.gbp_fmt())
+    .num_fmt()
+  }
+
+  # blue divider tab, matching the other section separators
   sep_name <- "Custom Indicators >>>"
   if (!sep_name %in% names(wb)) {
     addWorksheet(wb, sep_name, tabColour = "#8DB4E2")
@@ -349,129 +359,97 @@ source("utils/excel_helpers.R", local = FALSE)
     setRowHeights(wb, sep_name, rows = 1, heights = 60)
   }
 
-  # per-row number formats (rates show "5.0%", levels show comma-thousands;
-  # change column signed, bold, with a "pp" suffix for rates)
-  fmt_rate_val <- createStyle(numFmt = "0.0\"%\"")
-  fmt_lev_val  <- createStyle(numFmt = "#,##0.###")
-  fmt_rate_chg <- createStyle(numFmt = "+0.0\" pp\";-0.0\" pp\";0\" pp\"",
-                              textDecoration = "bold")
-  fmt_lev_chg  <- createStyle(numFmt = "+#,##0.###;-#,##0.###;0",
-                              textDecoration = "bold")
-  centre_st    <- createStyle(halign = "center")
-  yes_st <- createStyle(fontColour = "#006100", fgFill = "#C6EFCE",
-                        textDecoration = "bold", halign = "center")
-  no_st  <- createStyle(fontColour = "#7F7F7F", fgFill = "#F2F2F2", halign = "center")
-  na_st  <- createStyle(fontColour = "#BFBFBF", halign = "center")
-
-  # ===== Sheet 1: comparison grid =====
+  # ===== Sheet 1: comparison table =====
   sn <- "Custom Indicators"
   addWorksheet(wb, sn, tabColour = tab_col)
-  showGridLines(wb, sn, showGridLines = FALSE)
 
-  writeData(wb, sn, "Custom indicators - selected LMS series & comparisons",
-            startRow = 1, startCol = 1)
+  writeData(wb, sn, "Custom indicators - selected LMS series", startRow = 1, startCol = 1)
   addStyle(wb, sn, .ts(), rows = 1, cols = 1)
   setRowHeights(wb, sn, rows = 1, heights = 28)
 
-  hdr_row <- 2L
-  data_start <- hdr_row + 1L
+  hdr <- 2L; dstart <- 3L
   ncol_g <- ncol(grid)
-  writeData(wb, sn, grid, startRow = hdr_row, startCol = 1,
-            colNames = TRUE, headerStyle = .hs())
-  data_rows <- data_start:(data_start + nrow(grid) - 1L)
-  addStyle(wb, sn, .data_font(), rows = data_rows, cols = 1:ncol_g,
-           gridExpand = TRUE, stack = TRUE)
+  kind <- lms_audit$grid_kind
+  chg_hdrs <- lms_audit$change_headers
+  cur_col <- 5L
+  chg_cols <- if (length(chg_hdrs)) (cur_col + 1L):(cur_col + length(chg_hdrs)) else integer(0)
 
-  rate <- isTRUE(lms_audit$grid_rate) | lms_audit$grid_rate  # logical vector
-  rate[is.na(rate)] <- FALSE
-  rr <- data_start + which(rate) - 1L
-  lr <- data_start + which(!rate) - 1L
-  if (length(rr) > 0) {
-    addStyle(wb, sn, fmt_rate_val, rows = rr, cols = c(7, 9),
-             gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, fmt_rate_chg, rows = rr, cols = 10, stack = TRUE)
-  }
-  if (length(lr) > 0) {
-    addStyle(wb, sn, fmt_lev_val, rows = lr, cols = c(7, 9),
-             gridExpand = TRUE, stack = TRUE)
-    addStyle(wb, sn, fmt_lev_chg, rows = lr, cols = 10, stack = TRUE)
-  }
+  writeData(wb, sn, grid, startRow = hdr, startCol = 1, colNames = TRUE, headerStyle = .hs())
+  drows <- dstart:(dstart + nrow(grid) - 1L)
+  addStyle(wb, sn, .data_font(), rows = drows, cols = 1:ncol_g, gridExpand = TRUE, stack = TRUE)
+  addStyle(wb, sn, .cmp_label(), rows = drows, cols = 1, gridExpand = TRUE, stack = TRUE)
+  addStyle(wb, sn, .id_code(),   rows = drows, cols = 2, gridExpand = TRUE, stack = TRUE)
+  addStyle(wb, sn, ctr,          rows = drows, cols = c(2, 3, 4), gridExpand = TRUE, stack = TRUE)
 
-  # centre the short categorical columns
-  addStyle(wb, sn, centre_st, rows = data_rows, cols = c(1, 4, 6, 8),
-           gridExpand = TRUE, stack = TRUE)
-
-  # colour the "In briefing" column by Yes / No / n-a
-  brief <- grid[["In briefing"]]
-  for (val_st in list(list(v = "Yes", s = yes_st), list(v = "No", s = no_st),
-                      list(v = "n/a", s = na_st))) {
-    hit <- which(brief == val_st$v)
-    if (length(hit) > 0)
-      addStyle(wb, sn, val_st$s, rows = data_start + hit - 1L, cols = ncol_g,
+  for (i in seq_len(nrow(grid))) {
+    rr <- dstart + i - 1L
+    addStyle(wb, sn, fmt_for(kind[i], FALSE), rows = rr, cols = cur_col, stack = TRUE)
+    if (length(chg_cols))
+      addStyle(wb, sn, fmt_for(kind[i], TRUE), rows = rr, cols = chg_cols,
                gridExpand = TRUE, stack = TRUE)
   }
 
-  setColWidths(wb, sn, cols = 1:ncol_g,
-               widths = c(10, 42, 12, 11, 24, 15, 13, 17, 15, 13, 11)[1:ncol_g])
-  addFilter(wb, sn, rows = hdr_row, cols = 1:ncol_g)
-  freezePane(wb, sn, firstActiveRow = data_start, firstActiveCol = 3)
+  # sign-based green / red on the change cells (same rule as the Dashboard)
+  for (ci in chg_cols) for (ri in drows) {
+    conditionalFormatting(wb, sn, cols = ci, rows = ri, type = "expression", rule = ">0", style = .pos())
+    conditionalFormatting(wb, sn, cols = ci, rows = ri, type = "expression", rule = "<0", style = .neg())
+  }
 
-  # footer: the exact summary lines that go into the briefing, then provenance
-  foot <- data_start + nrow(grid) + 1L
+  widths <- c(44, 10, 11, 15, 13, rep(17, length(chg_hdrs)))
+  setColWidths(wb, sn, cols = 1:ncol_g, widths = widths[1:ncol_g])
+  freezePane(wb, sn, firstActiveRow = dstart, firstActiveCol = 2)
+
+  # footer: the exact summary lines in the briefing, a pp note, then provenance
+  foot <- dstart + nrow(grid) + 1L
   lines <- lms_audit$lines
   if (length(lines) > 0) {
-    writeData(wb, sn, "Summary lines included in the briefing",
-              startRow = foot, startCol = 1)
+    writeData(wb, sn, "Summary lines included in the briefing", startRow = foot, startCol = 1)
     addStyle(wb, sn, .ss(), rows = foot, cols = 1)
-    for (i in seq_along(lines)) {
-      writeData(wb, sn, paste0("\u2022  ", lines[i]),
-                startRow = foot + i, startCol = 1)
-    }
+    for (i in seq_along(lines))
+      writeData(wb, sn, paste0(bullet, "  ", lines[i]), startRow = foot + i, startCol = 1)
     foot <- foot + length(lines) + 1L
+  }
+  if (length(chg_cols) > 0 && any(kind == "rate")) {
+    writeData(wb, sn, "Percentage-point changes are shown as plain decimals; add 'pp' when quoting in the brief.",
+              startRow = foot, startCol = 1)
+    addStyle(wb, sn, .id_code(), rows = foot, cols = 1)
+    foot <- foot + 1L
   }
   if (!is.null(lms_audit$provenance) && nzchar(lms_audit$provenance)) {
     writeData(wb, sn, lms_audit$provenance, startRow = foot + 1L, startCol = 1)
     addStyle(wb, sn, .id_code(), rows = foot + 1L, cols = 1)
   }
 
-  # ===== Sheet 2: full source series (long form) =====
-  dat <- lms_audit$data
-  if (!is.null(dat) && nrow(dat) > 0L) {
+  # ===== Sheet 2: full source series, wide, one block per frequency =====
+  blocks <- lms_audit$data_blocks
+  if (length(blocks) > 0) {
     sn2 <- "Custom Indicators Data"
     addWorksheet(wb, sn2, tabColour = tab_col)
-    showGridLines(wb, sn2, showGridLines = FALSE)
-
-    writeData(wb, sn2, "Custom indicators - full source series (provenance)",
-              startRow = 1, startCol = 1)
+    writeData(wb, sn2, "Custom indicators - full source series", startRow = 1, startCol = 1)
     addStyle(wb, sn2, .ts(), rows = 1, cols = 1)
     setRowHeights(wb, sn2, rows = 1, heights = 28)
 
-    ncol_d <- ncol(dat)
-    writeData(wb, sn2, dat, startRow = hdr_row, startCol = 1,
-              colNames = TRUE, headerStyle = .hs())
-    d_rows <- data_start:(data_start + nrow(dat) - 1L)
-    addStyle(wb, sn2, .data_font(), rows = d_rows, cols = 1:ncol_d,
-             gridExpand = TRUE, stack = TRUE)
-
-    drate <- lms_audit$data_rate
-    drate[is.na(drate)] <- FALSE
-    drr <- data_start + which(drate) - 1L
-    dlr <- data_start + which(!drate) - 1L
-    val_col <- which(names(dat) == "Value")
-    if (length(val_col) == 1L) {
-      if (length(drr) > 0)
-        addStyle(wb, sn2, fmt_rate_val, rows = drr, cols = val_col,
+    r <- 3L; maxc <- 1L
+    for (blk in blocks) {
+      df <- blk$df; nc <- ncol(df); maxc <- max(maxc, nc)
+      writeData(wb, sn2, paste0(blk$freq, " series"), startRow = r, startCol = 1)
+      addStyle(wb, sn2, .ss(), rows = r, cols = 1); r <- r + 1L
+      for (j in seq_along(blk$titles))
+        writeData(wb, sn2, blk$titles[j], startRow = r, startCol = 1 + j)
+      addStyle(wb, sn2, .id_code(), rows = r, cols = 2:nc, gridExpand = TRUE, stack = TRUE)
+      r <- r + 1L
+      names(df) <- c("Period", blk$cdids)
+      writeData(wb, sn2, df, startRow = r, startCol = 1, colNames = TRUE, headerStyle = .hs())
+      drs <- (r + 1L):(r + nrow(df))
+      addStyle(wb, sn2, .data_font(), rows = drs, cols = 1:nc, gridExpand = TRUE, stack = TRUE)
+      for (j in seq_along(blk$cdids))
+        addStyle(wb, sn2, fmt_for(blk$kind[j], FALSE), rows = drs, cols = 1 + j,
                  gridExpand = TRUE, stack = TRUE)
-      if (length(dlr) > 0)
-        addStyle(wb, sn2, fmt_lev_val, rows = dlr, cols = val_col,
-                 gridExpand = TRUE, stack = TRUE)
+      r <- r + nrow(df) + 2L
     }
-    addStyle(wb, sn2, centre_st, rows = d_rows, cols = c(1, 3, 4),
-             gridExpand = TRUE, stack = TRUE)
-
-    setColWidths(wb, sn2, cols = 1:ncol_d, widths = c(10, 42, 11, 14, 14)[1:ncol_d])
-    addFilter(wb, sn2, rows = hdr_row, cols = 1:ncol_d)
-    freezePane(wb, sn2, firstActiveRow = data_start, firstActiveCol = 3)
+    setColWidths(wb, sn2, cols = 1, widths = 14)
+    if (maxc > 1L) setColWidths(wb, sn2, cols = 2:maxc, widths = 13)
+    freezePane(wb, sn2, firstCol = TRUE)
   }
 
   invisible(c("Custom Indicators", "Custom Indicators Data"))

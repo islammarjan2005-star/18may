@@ -576,89 +576,89 @@ append_custom_indicators <- function(docx_path, body_fragment) {
 
 # ---- audit-workbook data --------------------------------------------------
 
-# Build the data the Excel audit workbook needs for its Custom Indicators
-# sheets. Returns numeric values (not formatted strings) so the workbook can
-# apply its own number formats and stay sortable/filterable.
-#   grid       one row per (series x comparison): CDID, Title, Unit, Frequency,
-#              Comparison, Latest period, Latest value, Comparison period,
-#              Comparison value, Change, In briefing.
-#   grid_rate  per-grid-row logical: is the series a rate? (drives number fmt)
-#   data       long full series: CDID, Title, Frequency, Period, Value.
-#   data_rate  per-data-row logical.
-#   lines      the summary-line texts that are included (after line_keys filter).
-#   provenance one-line source note.
+# Build the data for the Excel audit workbook's Custom Indicators sheets,
+# laid out like the workbook's other comparison tables: one ROW per selected
+# series, one COLUMN for the latest value plus one per requested baseline
+# change. Values stay numeric so the workbook applies its own number formats
+# and sign-based green/red conditional formatting.
+#   grid           one row per series: Series, CDID, Frequency, Latest period,
+#                  Current, then one "Change on the ..." column per baseline.
+#   grid_kind      per-row "rate" / "gbp" / "num" (drives number format).
+#   change_headers names of the change columns (the ones coloured by sign).
+#   data_blocks    wide full-series blocks, one per frequency present:
+#                  list(freq, df[Period + one col per CDID], titles, cdids, kind).
+#   lines          included summary-line texts (after the line_keys filter).
+#   provenance     one-line source note.
 build_custom_audit <- function(selections, catalog, periods, path, line_keys = NULL) {
   flab <- c(M = "Monthly", Q = "Quarterly", A = "Annual")
+  gbp_char <- intToUtf8(163L)
 
-  g_cdid <- character(0); g_title <- character(0); g_unit <- character(0)
-  g_freq <- character(0); g_comp  <- character(0); g_lper <- character(0)
-  g_lval <- numeric(0);   g_bper  <- character(0); g_bval <- numeric(0)
-  g_chg  <- numeric(0);   g_brief <- character(0); g_rate <- logical(0)
+  empty <- list(grid = NULL, grid_kind = character(0), change_headers = character(0),
+                data_blocks = list(), lines = character(0), provenance = "")
+  if (length(selections) == 0L) return(empty)
 
-  d_cdid <- character(0); d_title <- character(0); d_freq <- character(0)
-  d_per  <- character(0); d_val   <- numeric(0);   d_rate <- logical(0)
+  # union of requested baselines (the change columns), in canonical order
+  delta_order <- c("month", "quarter", "year", "precovid", "election")
+  change_ids <- intersect(delta_order, unique(unlist(lapply(selections,
+                  function(s) setdiff(s$baselines, "current")))))
+  change_headers <- vapply(change_ids, function(b) {
+    lbl <- LMS_BASELINES[[b]]$label
+    paste0("Change ", tolower(substr(lbl, 1L, 1L)), substr(lbl, 2L, nchar(lbl)))
+  }, "")
 
-  push_grid <- function(cdid, title, unit, freq, comp, lper, lval,
-                        bper, bval, chg, brief, rate) {
-    g_cdid  <<- c(g_cdid, cdid);  g_title <<- c(g_title, title)
-    g_unit  <<- c(g_unit, unit);  g_freq  <<- c(g_freq, freq)
-    g_comp  <<- c(g_comp, comp);  g_lper  <<- c(g_lper, lper)
-    g_lval  <<- c(g_lval, lval);  g_bper  <<- c(g_bper, bper)
-    g_bval  <<- c(g_bval, bval);  g_chg   <<- c(g_chg, chg)
-    g_brief <<- c(g_brief, brief); g_rate <<- c(g_rate, rate)
-  }
+  n <- length(selections)
+  g_series <- character(n); g_cdid <- character(n); g_freq <- character(n)
+  g_lper <- rep(NA_character_, n); g_cur <- rep(NA_real_, n); g_kind <- rep("num", n)
+  chg <- matrix(NA_real_, nrow = n, ncol = length(change_ids),
+                dimnames = list(NULL, change_ids))
+  store <- list()   # series kept for the wide data sheet
 
-  for (sel in selections) {
+  for (i in seq_along(selections)) {
+    sel <- selections[[i]]
     crow <- catalog[catalog$cdid == sel$cdid, , drop = FALSE]
-    if (nrow(crow) == 0L) next
+    if (nrow(crow) == 0L) { g_series[i] <- sel$cdid; g_cdid[i] <- sel$cdid; next }
     is_rate <- .lms_is_rate(crow)
-    unit    <- .lms_unit_label(crow)
-    fl      <- flab[[sel$freq]]
-    series  <- lms_series(catalog, periods, path, sel$cdid, sel$freq)
-
-    if (is.null(series) || nrow(series) == 0L) {
-      push_grid(sel$cdid, crow$title, unit, fl, "(no data)",
-                NA_character_, NA_real_, NA_character_, NA_real_, NA_real_, "n/a", is_rate)
-      next
-    }
-
-    # full series -> data sheet
-    n <- nrow(series)
-    d_cdid <- c(d_cdid, rep(sel$cdid, n)); d_title <- c(d_title, rep(crow$title, n))
-    d_freq <- c(d_freq, rep(fl, n));       d_per   <- c(d_per, series$period_label)
-    d_val  <- c(d_val, series$value);      d_rate  <- c(d_rate, rep(is_rate, n))
-
-    latest_per <- series$period_label[n]; latest_val <- series$value[n]
-    bls <- setdiff(sel$baselines, "current")
-    bls <- Filter(function(b) sel$freq %in% LMS_BASELINES[[b]]$applies, bls)
-
-    if (length(bls) == 0L) {
-      push_grid(sel$cdid, crow$title, unit, fl, "Latest",
-                latest_per, latest_val, NA_character_, NA_real_, NA_real_, "", is_rate)
-      next
-    }
-    for (b in bls) {
+    g_series[i] <- crow$title
+    g_cdid[i]   <- sel$cdid
+    g_freq[i]   <- flab[[sel$freq]]
+    g_kind[i]   <- if (is_rate) "rate"
+                   else if (grepl(gbp_char, paste(crow$unit, crow$pre_unit), fixed = TRUE)) "gbp"
+                   else "num"
+    series <- lms_series(catalog, periods, path, sel$cdid, sel$freq)
+    if (is.null(series) || nrow(series) == 0L) next
+    store[[length(store) + 1L]] <- list(cdid = sel$cdid, title = crow$title,
+        freq = sel$freq, kind = g_kind[i], df = series)
+    last <- nrow(series)
+    g_lper[i] <- series$period_label[last]; g_cur[i] <- series$value[last]
+    for (b in change_ids) {
+      if (!b %in% sel$baselines || !sel$freq %in% LMS_BASELINES[[b]]$applies) next
       base <- lms_baseline_value(series, sel$freq, b, crow)
-      chg  <- if (is.na(base$value)) NA_real_ else latest_val - base$value
-      key  <- paste0(sel$cdid, "|", b)
-      brief <- if (is.na(chg)) "n/a"
-               else if (is.null(line_keys) || key %in% line_keys) "Yes" else "No"
-      push_grid(sel$cdid, crow$title, unit, fl, LMS_BASELINES[[b]]$label,
-                latest_per, latest_val, base$period_label, base$value, chg, brief, is_rate)
+      if (!is.na(base$value)) chg[i, b] <- series$value[last] - base$value
     }
   }
 
-  grid <- data.frame(
-    CDID = g_cdid, Title = g_title, Unit = g_unit, Frequency = g_freq,
-    Comparison = g_comp, `Latest period` = g_lper, `Latest value` = g_lval,
-    `Comparison period` = g_bper, `Comparison value` = g_bval,
-    Change = g_chg, `In briefing` = g_brief,
-    check.names = FALSE, stringsAsFactors = FALSE)
+  grid <- data.frame(Series = g_series, CDID = g_cdid, Frequency = g_freq,
+                     `Latest period` = g_lper, Current = g_cur,
+                     check.names = FALSE, stringsAsFactors = FALSE)
+  for (j in seq_along(change_ids)) grid[[change_headers[j]]] <- chg[, j]
 
-  data_df <- data.frame(
-    CDID = d_cdid, Title = d_title, Frequency = d_freq,
-    Period = d_per, Value = d_val,
-    check.names = FALSE, stringsAsFactors = FALSE)
+  # wide full series, grouped by frequency (mirrors the LMS source layout)
+  data_blocks <- list()
+  for (fr in c("M", "Q", "A")) {
+    ss <- Filter(function(x) x$freq == fr, store)
+    if (length(ss) == 0L) next
+    per <- do.call(rbind, lapply(ss, function(x) x$df[, c("date", "period_label")]))
+    per <- per[!duplicated(per$period_label), , drop = FALSE]
+    per <- per[order(per$date), , drop = FALSE]
+    block <- data.frame(Period = per$period_label, check.names = FALSE,
+                        stringsAsFactors = FALSE)
+    for (x in ss) block[[x$cdid]] <- x$df$value[match(per$period_label, x$df$period_label)]
+    data_blocks[[length(data_blocks) + 1L]] <- list(
+      freq = flab[[fr]], df = block,
+      titles = vapply(ss, `[[`, "", "title"),
+      cdids  = vapply(ss, `[[`, "", "cdid"),
+      kind   = vapply(ss, `[[`, "", "kind"))
+  }
 
   recs <- lms_summary_lines(selections, catalog, periods, path)
   if (!is.null(line_keys)) recs <- Filter(function(r) r$key %in% line_keys, recs)
@@ -666,9 +666,8 @@ build_custom_audit <- function(selections, catalog, periods, path, line_keys = N
 
   rel <- if (nrow(catalog) > 0 && nzchar(catalog$release[1])) catalog$release[1] else "n/a"
 
-  list(grid = grid, grid_rate = g_rate,
-       data = data_df, data_rate = d_rate,
-       lines = lines,
+  list(grid = grid, grid_kind = g_kind, change_headers = unname(change_headers),
+       data_blocks = data_blocks, lines = lines,
        provenance = paste0(
          "Source: ONS Labour Market Statistics time-series (LMS), CDID-referenced. ",
          "Every figure traces to the uploaded LMS file -> CDID -> period. ",
