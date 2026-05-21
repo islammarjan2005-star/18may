@@ -281,38 +281,62 @@ lms_series <- function(catalog, periods, path, cdid, freq) {
   if (m[1] == -1L) 0L else (n - min(m) + 1L)
 }
 
-# Detect the "breakdown family" a series belongs to: other series whose titles
-# share the longest stem that ends at a delimiter (" - ", ": ", " by ", " (")
-# and still has >=2 members - e.g. "UK Job Vacancies (thousands) - {industry}".
-# Returns list(label, cdids, variants, n) with the seed first, or NULL.
-lms_series_family <- function(catalog, seed_cdid) {
-  i0 <- which(catalog$cdid == seed_cdid); if (!length(i0)) return(NULL)
-  ttl <- catalog$title[i0[1]]; if (is.na(ttl) || !nzchar(ttl)) return(NULL)
-  titles <- catalog$title
-  cuts <- integer(0)
-  for (pat in c(" - ", ": ", " by ", " \\(")) {
-    ms <- gregexpr(pat, ttl, perl = TRUE)[[1]]
-    if (ms[1] != -1L) cuts <- c(cuts, ms + attr(ms, "match.length") - 1L)
-  }
-  cuts <- sort(unique(cuts[cuts >= 8L & cuts < nchar(ttl)]), decreasing = TRUE)
+# Group the whole catalogue into "breakdown families": series whose titles
+# share a stem that ends at a delimiter (" - ", ": ", " by ", " (") and differ
+# only in one category slot (industry, age, region, sex, ...). Each title is
+# assigned the LONGEST such stem that has >=2 members catalogue-wide, so the
+# families come out at a single breakdown level (e.g. vacancies by industry =
+# 19, employment by country of birth = 18) rather than as broad grab-bags.
+# Returns list(families, fam_of): `families` is sorted largest-first, each
+# list(label, cdids, variants, n); `fam_of` maps cdid -> family index (NA if
+# the series has no family).
+lms_build_families <- function(catalog, min_stem = 10L) {
+  titles <- catalog$title; cdids <- catalog$cdid; n <- length(titles)
   ell <- intToUtf8(0x2026L)
-  for (cp in cuts) {
-    pref <- substr(ttl, 1L, cp)
-    mem <- which(startsWith(titles, pref) & nchar(titles) > cp)
-    if (length(mem) >= 2L) {
-      mt <- titles[mem]; vars <- substr(mt, cp + 1L, nchar(mt))
-      ovs <- if (length(vars) > 1L) min(vapply(vars[-1], function(x) .lms_csfx(vars[1], x), 0L)) else 0L
-      ovs <- .lms_snap_suf(vars[1], ovs)
-      sufx   <- if (ovs > 0L) trimws(substr(vars[1], nchar(vars[1]) - ovs + 1L, nchar(vars[1]))) else ""
-      vshort <- trimws(substr(vars, 1L, nchar(vars) - ovs))
-      stem <- trimws(pref)
-      label <- if (nzchar(sufx)) paste0(stem, " ", ell, " ", sufx) else paste0(stem, " ", ell)
-      ord <- order(mem != i0[1])
-      return(list(label = label, cdids = catalog$cdid[mem][ord],
-                  variants = vshort[ord], n = length(mem)))
+  none <- list(families = list(), fam_of = setNames(rep(NA_integer_, n), cdids))
+  if (n == 0L) return(none)
+
+  cut_list <- vector("list", n)
+  for (i in seq_len(n)) {
+    t <- titles[i]
+    if (is.na(t) || !nzchar(t)) { cut_list[[i]] <- character(0); next }
+    cps <- integer(0)
+    for (pat in c(" - ", ": ", " by ", " \\(")) {
+      ms <- gregexpr(pat, t, perl = TRUE)[[1]]
+      if (ms[1] != -1L) cps <- c(cps, ms + attr(ms, "match.length") - 1L)
     }
+    cps <- unique(cps[cps >= min_stem & cps < nchar(t)])
+    # substring() (not substr) vectorises over the stop arg -> all cut prefixes
+    cut_list[[i]] <- if (length(cps)) substring(t, 1L, cps) else character(0)
   }
-  NULL
+  allp <- unlist(cut_list, use.names = FALSE)
+  if (!length(allp)) return(none)
+  cnt <- table(allp); cntv <- setNames(as.integer(cnt), names(cnt))
+
+  fam_key <- rep(NA_character_, n)
+  for (i in seq_len(n)) {
+    ps <- cut_list[[i]]; if (!length(ps)) next
+    qual <- ps[cntv[ps] >= 2L]
+    if (length(qual)) fam_key[i] <- qual[which.max(nchar(qual))]
+  }
+
+  keys <- unique(fam_key[!is.na(fam_key)])
+  families <- vector("list", length(keys))
+  for (ki in seq_along(keys)) {
+    key <- keys[ki]; idx <- which(fam_key == key); mt <- titles[idx]
+    vars <- substr(mt, nchar(key) + 1L, nchar(mt))
+    ovs <- if (length(vars) > 1L) min(vapply(vars[-1], function(x) .lms_csfx(vars[1], x), 0L)) else 0L
+    ovs <- .lms_snap_suf(vars[1], ovs)
+    sufx   <- if (ovs > 0L) trimws(substr(vars[1], nchar(vars[1]) - ovs + 1L, nchar(vars[1]))) else ""
+    vshort <- trimws(substr(vars, 1L, nchar(vars) - ovs)); stem <- trimws(key)
+    label  <- if (nzchar(sufx)) paste0(stem, " ", ell, " ", sufx) else paste0(stem, " ", ell)
+    families[[ki]] <- list(label = label, cdids = cdids[idx],
+                           variants = vshort, n = length(idx))
+  }
+  families <- families[order(-vapply(families, `[[`, 0L, "n"))]
+  fam_of <- setNames(rep(NA_integer_, n), cdids)
+  for (fi in seq_along(families)) fam_of[families[[fi]]$cdids] <- fi
+  list(families = families, fam_of = fam_of)
 }
 
 # ---- baseline lookup --------------------------------------------------------

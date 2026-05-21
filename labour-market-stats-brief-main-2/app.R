@@ -688,6 +688,11 @@ ui <- fluidPage(
                                          choices = NULL, multiple = TRUE, width = "100%",
                                          options = list(placeholder = "Type to search...",
                                                         maxOptions = 25)),
+                          selectizeInput("lms_family_pick",
+                                         "Or add a whole breakdown (search by metric, e.g. \"vacancies\")",
+                                         choices = NULL, multiple = FALSE, width = "100%",
+                                         options = list(placeholder = "Type a metric to find its breakdown families...",
+                                                        maxOptions = 25)),
                           uiOutput("lms_settings_rows"),
                           div(style = "margin-top:18px;",
                               actionButton("regenerate_custom", "Refresh preview",
@@ -938,13 +943,25 @@ server <- function(input, output, session) {
         res <- tryCatch(parse_lms_catalog(files$datapath[i]),
                         error = function(e) list(ok = FALSE, warn = conditionMessage(e)))
         if (isTRUE(res$ok)) {
+          fams <- tryCatch(lms_build_families(res$catalog),
+                           error = function(e) list(families = list(), fam_of = NULL))
           lms_catalog_data(list(catalog = res$catalog, periods = res$periods,
-                                path = files$datapath[i]))
+                                path = files$datapath[i], families = fams))
           cat0 <- res$catalog
           choices <- setNames(cat0$cdid, paste0(cat0$cdid, " | ", cat0$title))
           updateSelectizeInput(session, "lms_pick",
                                choices = choices, server = TRUE,
                                selected = character(0))
+          fam_choices <- if (length(fams$families))
+            setNames(as.character(seq_along(fams$families)),
+                     vapply(fams$families,
+                            function(g) sprintf("%s  (%d series)", g$label, g$n), "")) else NULL
+          updateSelectizeInput(session, "lms_family_pick",
+                               choices = fam_choices, server = TRUE,
+                               selected = character(0))
+          if (length(fams$families))
+            showNotification(sprintf("%d breakdown families detected.", length(fams$families)),
+                             type = "message", duration = 4)
           for (w in res$warn) showNotification(w, type = "warning", duration = 10)
         } else {
           showNotification(
@@ -2234,7 +2251,11 @@ server <- function(input, output, session) {
       default_freq <- if ("Q" %in% avail) "Q" else avail[1]  # prefer quarterly
 
       # offer to add the rest of this series' breakdown family (industry, age, ...)
-      fam <- tryCatch(lms_series_family(cat0, cdid), error = function(e) NULL)
+      fam <- NULL
+      if (!is.null(cd$families)) {
+        fi <- unname(cd$families$fam_of[cdid])
+        if (!is.na(fi)) fam <- cd$families$families[[fi]]
+      }
       fam_ui <- NULL
       if (!is.null(fam) && fam$n > 1L) {
         not_added <- setdiff(fam$cdids, picks)
@@ -2288,9 +2309,9 @@ server <- function(input, output, session) {
           updateCheckboxGroupInput(session, paste0("lms_", cc, "_baselines"), selected = sel)
         }, ignoreInit = TRUE)
         observeEvent(input[[paste0("lms_addfam_", cc)]], {
-          cdat <- lms_catalog_data(); if (is.null(cdat)) return()
-          fam <- tryCatch(lms_series_family(cdat$catalog, cc), error = function(e) NULL)
-          if (is.null(fam)) return()
+          cdat <- lms_catalog_data(); if (is.null(cdat) || is.null(cdat$families)) return()
+          fi <- unname(cdat$families$fam_of[cc]); if (is.na(fi)) return()
+          fam <- cdat$families$families[[fi]]
           added <- setdiff(fam$cdids, input$lms_pick)
           if (length(added) == 0L) return()
           ch <- setNames(cdat$catalog$cdid,
@@ -2304,6 +2325,23 @@ server <- function(input, output, session) {
     }
     if (length(new) > 0L) lms_bl_all_registered(c(reg, new))
   }, ignoreNULL = FALSE)
+
+  # "Add a whole breakdown" search: selecting a family adds all its members.
+  observeEvent(input$lms_family_pick, {
+    cd <- lms_catalog_data(); if (is.null(cd) || is.null(cd$families)) return()
+    v <- input$lms_family_pick
+    if (length(v) == 0L || !nzchar(v)) return()
+    fi <- suppressWarnings(as.integer(v))
+    if (is.na(fi) || fi < 1L || fi > length(cd$families$families)) return()
+    fam <- cd$families$families[[fi]]
+    added <- setdiff(fam$cdids, input$lms_pick)
+    ch <- setNames(cd$catalog$cdid, paste0(cd$catalog$cdid, " | ", cd$catalog$title))
+    updateSelectizeInput(session, "lms_pick", choices = ch,
+                         selected = union(input$lms_pick, fam$cdids), server = TRUE)
+    updateSelectizeInput(session, "lms_family_pick", selected = character(0))
+    showNotification(sprintf("Added %d series from '%s'.", length(added), fam$label),
+                     type = "message", duration = 3)
+  }, ignoreNULL = TRUE)
 
   observeEvent(input$regenerate_custom, {
     cd <- lms_catalog_data()
