@@ -64,6 +64,10 @@ chart_metric_choices <- function() {
 }
 
 .wc_write_text <- function(txt, p) {
+  # Force UTF-8 marking — without this, enc2utf8() in a C locale treats
+  # "unknown"-encoded strings as native (ASCII) and replaces every byte ≥ 128
+  # with "<XX>" hex notation, corrupting any Unicode glyph (•, ↑, em-dash, …).
+  Encoding(txt) <- "UTF-8"
   writeBin(charToRaw(enc2utf8(txt)), p)
 }
 

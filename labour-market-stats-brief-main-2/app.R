@@ -1,6 +1,7 @@
 library(shiny)
 
 source("utils/word_charts.R")
+source("utils/lms_explorer.R")
 
 ui <- fluidPage(
   
@@ -552,6 +553,9 @@ ui <- fluidPage(
                                              actionButton("manual_jump_charts", "Charts",
                                                           class = "govuk-button govuk-button--blue",
                                                           onclick = "document.getElementById('charts_card').scrollIntoView({behavior:'smooth', block:'start'})"),
+                                             actionButton("manual_jump_custom", "Custom",
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "document.getElementById('custom_indicators_card').scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -603,6 +607,9 @@ ui <- fluidPage(
                                              actionButton("auto_jump_charts", "Charts",
                                                           class = "govuk-button govuk-button--blue",
                                                           onclick = "document.getElementById('charts_card').scrollIntoView({behavior:'smooth', block:'start'})"),
+                                             actionButton("auto_jump_custom", "Custom",
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "document.getElementById('custom_indicators_card').scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -661,7 +668,35 @@ ui <- fluidPage(
                                 "Click after changing any selection. The same charts are appended to the Word briefing.")),
                         plotOutput("charts_preview", height = "auto")
                     )
-                )
+                ),
+                div(class = "dashboard-card", id = "custom_indicators_card",
+                    div(class = "dashboard-card__header", "Custom Indicators Preview"),
+                    div(class = "dashboard-card__content",
+                        conditionalPanel(
+                          condition = "output.lms_loaded == false",
+                          div(class = "govuk-hint",
+                              "Upload the LMS bulk time-series file to enable. ",
+                              "Use the file upload above (any filename containing 'lms' is auto-detected).")),
+                        conditionalPanel(
+                          condition = "output.lms_loaded == true",
+                          selectizeInput("lms_pick",
+                                         "Add a series (search by CDID or title)",
+                                         choices = NULL, multiple = TRUE, width = "100%",
+                                         options = list(placeholder = "Type to search...",
+                                                        maxOptions = 25)),
+                          uiOutput("lms_settings_rows"),
+                          div(style = "margin-top:18px;",
+                              actionButton("regenerate_custom", "Refresh preview",
+                                           class = "govuk-button govuk-button--blue",
+                                           style = "width:100%;"),
+                              div(class = "govuk-hint", style = "margin-top:10px;",
+                                  "Click after changing any selection. These rows are appended to the Word briefing.")),
+                          h3(class = "govuk-heading-s", style = "margin-top:18px;",
+                             "Table preview"),
+                          uiOutput("lms_table_preview"),
+                          h3(class = "govuk-heading-s", style = "margin-top:18px;",
+                             "Summary lines"),
+                          uiOutput("lms_summary_preview"))))
       )
   ),
   
@@ -709,7 +744,8 @@ server <- function(input, output, session) {
     x02 = NULL,
     oecd_unemp = NULL,
     oecd_emp = NULL,
-    oecd_inact = NULL
+    oecd_inact = NULL,
+    lms = NULL
   )
   
   # oecd data auto-fetched from the oecd.* postgres tables (same source
@@ -762,6 +798,7 @@ server <- function(input, output, session) {
     if (grepl("hr1", nm)) return("hr1")
     if (grepl("x09", nm)) return("x09")
     if (grepl("x02", nm)) return("x02")
+    if (grepl("lms", nm)) return("lms")
     sheets <- tryCatch(tolower(readxl::excel_sheets(path)), error = function(e) character(0))
     if (any(sheets %in% c("1", "10", "13", "15", "19"))) return("a01")
     if (any(sheets %in% c("1a"))) return("hr1")
@@ -769,6 +806,14 @@ server <- function(input, output, session) {
     if (any(grepl("payrolled employees", sheets))) return("rtisa")
     if (any(grepl("claimant", sheets)) || any(grepl("people sa", sheets))) return("cla01")
     if (any(grepl("labour market flows", sheets))) return("x02")
+    # LMS bulk file content check: sheet "data" + row-2/col-A literal "CDID"
+    if ("data" %in% sheets) {
+      cdid_cell <- tryCatch(suppressMessages(readxl::read_excel(
+        path, sheet = "data", range = "A2:A2", col_names = FALSE,
+        .name_repair = "minimal"))[[1]][1], error = function(e) NA)
+      if (!is.na(cdid_cell) && toupper(trimws(as.character(cdid_cell))) == "CDID")
+        return("lms")
+    }
     # last resort: check contents for oecd files with non-standard names
     oecd_result <- .detect_oecd_metric_from_content(path)
     if (!is.null(oecd_result)) return(oecd_result)
@@ -883,11 +928,31 @@ server <- function(input, output, session) {
         uploaded_files$oecd_emp <- files$datapath[i]
       } else if (ftype == "oecd_inact") {
         uploaded_files$oecd_inact <- files$datapath[i]
+      } else if (ftype == "lms") {
+        uploaded_files$lms <- files$datapath[i]
+        # Parse the catalog synchronously (rows 1-7 + col A only, sub-second).
+        res <- tryCatch(parse_lms_catalog(files$datapath[i]),
+                        error = function(e) list(ok = FALSE, warn = conditionMessage(e)))
+        if (isTRUE(res$ok)) {
+          lms_catalog_data(list(catalog = res$catalog, periods = res$periods,
+                                path = files$datapath[i]))
+          cat0 <- res$catalog
+          choices <- setNames(cat0$cdid, paste0(cat0$cdid, " | ", cat0$title))
+          updateSelectizeInput(session, "lms_pick",
+                               choices = choices, server = TRUE,
+                               selected = character(0))
+          for (w in res$warn) showNotification(w, type = "warning", duration = 10)
+        } else {
+          showNotification(
+            paste0("LMS file rejected: ", paste(res$warn, collapse = "; ")),
+            type = "warning", duration = 10)
+        }
       }
-      
+
       .oecd_friendly <- c(oecd_unemp = "OECD Unemployment Rate",
                           oecd_emp = "OECD Employment Rate",
-                          oecd_inact = "OECD Inactivity Rate")
+                          oecd_inact = "OECD Inactivity Rate",
+                          lms = "LMS Bulk Series")
       display <- if (ftype %in% names(.oecd_friendly)) .oecd_friendly[[ftype]] else toupper(ftype)
       detected_types <- c(detected_types, display)
     }
@@ -1694,6 +1759,18 @@ server <- function(input, output, session) {
             contact_names = input$auto_contact_names
           )
 
+          # IMPORTANT: append the Custom Indicators section BEFORE the Key
+          # Charts page. Both insert before the last <w:sectPr>, so the second
+          # call sits closer to sectPr and the first ends up earlier in the
+          # body. Order on the page: OECD -> Custom -> Charts.
+          tryCatch({
+            sels <- lms_selections_data(); cd <- lms_catalog_data()
+            if (!is.null(sels) && length(sels) > 0L && !is.null(cd)) {
+              frag <- build_custom_indicators_xml(sels, cd$catalog, cd$periods, cd$path)
+              if (nzchar(frag)) append_custom_indicators(file, frag)
+            }
+          }, error = function(e) message("Custom indicators skipped: ", e$message))
+
           # append the configurable Key Charts page (native editable charts)
           tryCatch({
             source("sheets/lfs.R", local = FALSE)
@@ -2095,6 +2172,92 @@ server <- function(input, output, session) {
   observeEvent(input$preset_since_2010,  { cy <- as.integer(format(Sys.Date(), "%Y")); .apply_chart_preset(2010, cy) })
   observeEvent(input$preset_full,        { cy <- as.integer(format(Sys.Date(), "%Y")); .apply_chart_preset(1971, cy) })
 
+  # ---- LMS Explorer (custom indicators) -----------------------------------
+  # `lms_catalog_data`  is populated when the LMS file is uploaded.
+  # `lms_selections_data` holds the per-CDID selections set on "Refresh preview".
+  # `lms_table_preview_data` is the data.frame rendered in-app.
+  lms_catalog_data       <- reactiveVal(NULL)
+  lms_selections_data    <- reactiveVal(NULL)
+  lms_table_preview_data <- reactiveVal(NULL)
+
+  output$lms_loaded <- reactive({ !is.null(lms_catalog_data()) })
+  outputOptions(output, "lms_loaded", suspendWhenHidden = FALSE)
+
+  # Per-CDID settings rows. INVARIANT: all selected CDIDs render their own
+  # input widgets here; row order follows input$lms_pick.
+  output$lms_settings_rows <- renderUI({
+    cd <- lms_catalog_data(); picks <- input$lms_pick
+    if (is.null(cd) || length(picks) == 0L) {
+      return(div(class = "govuk-hint", style = "margin-top:8px;",
+                 "Pick one or more series above to configure them."))
+    }
+    cat0 <- cd$catalog
+    bl_choices <- setNames(names(LMS_BASELINES)[names(LMS_BASELINES) != "current"],
+                           vapply(names(LMS_BASELINES)[names(LMS_BASELINES) != "current"],
+                                  function(b) LMS_BASELINES[[b]]$label, ""))
+    rows <- lapply(picks, function(cdid) {
+      crow <- cat0[cat0$cdid == cdid, , drop = FALSE]
+      if (nrow(crow) == 0L) return(NULL)
+      avail <- .lms_avail_freqs(cd, cdid)
+      if (length(avail) == 0L) avail <- c("M","Q","A")  # graceful: show all if none
+      freq_choices <- setNames(avail, c(M="Monthly", Q="Quarterly", A="Annual")[avail])
+      div(style = "border-bottom:1px solid #e3e3e3; padding:10px 0;",
+          tags$strong(cdid), " | ", crow$title,
+          div(style = "display:flex; flex-wrap:wrap; gap:10px; padding-left:8px; margin-top:6px;",
+              div(style = "min-width:140px;",
+                  selectInput(paste0("lms_", cdid, "_freq"), "Frequency",
+                              choices = freq_choices, selected = avail[1],
+                              width = "100%")),
+              div(style = "min-width:300px;",
+                  checkboxGroupInput(paste0("lms_", cdid, "_baselines"), "Baselines",
+                                     choices = bl_choices, selected = names(bl_choices),
+                                     inline = TRUE)),
+              div(style = "min-width:140px;",
+                  checkboxInput(paste0("lms_", cdid, "_summary"),
+                                "Include summary line", value = TRUE))))
+    })
+    do.call(tagList, Filter(Negate(is.null), rows))
+  })
+
+  observeEvent(input$regenerate_custom, {
+    cd <- lms_catalog_data()
+    if (is.null(cd)) {
+      showNotification("Upload the LMS file first", type = "warning"); return()
+    }
+    picks <- input$lms_pick
+    if (length(picks) == 0L) {
+      lms_selections_data(NULL); lms_table_preview_data(NULL)
+      showNotification("Pick at least one series", type = "warning"); return()
+    }
+    sels <- list()
+    for (cdid in picks) {
+      row <- cd$catalog[cd$catalog$cdid == cdid, , drop = FALSE]
+      if (nrow(row) == 0L) next
+      freq <- input[[paste0("lms_", cdid, "_freq")]]
+      bls  <- input[[paste0("lms_", cdid, "_baselines")]]
+      summ <- isTRUE(input[[paste0("lms_", cdid, "_summary")]])
+      if (is.null(freq) || length(bls) == 0L) next
+      # drop baselines not applicable to chosen frequency
+      bls_keep <- vapply(bls, function(b) freq %in% LMS_BASELINES[[b]]$applies, logical(1))
+      bls <- bls[bls_keep]
+      sels[[length(sels) + 1L]] <- list(
+        cdid = cdid, title = row$title, unit = row$unit, pre_unit = row$pre_unit,
+        freq = freq, baselines = bls, summary = summ, catalog_row = row)
+    }
+    if (length(sels) == 0L) {
+      lms_selections_data(NULL); lms_table_preview_data(NULL)
+      showNotification("Selections have no applicable baselines", type = "warning"); return()
+    }
+    lms_selections_data(sels)
+    df <- tryCatch(build_custom_preview_df(sels, cd$catalog, cd$periods, cd$path),
+                   error = function(e) {
+                     showNotification(paste("LMS preview error:", e$message), type = "error")
+                     NULL
+                   })
+    lms_table_preview_data(df)
+    showNotification("Custom indicators refreshed", type = "message", duration = 3)
+  })
+
   # manual preview: oecd
   oecd_preview_data <- reactiveVal(NULL)
   
@@ -2341,6 +2504,15 @@ server <- function(input, output, session) {
               contact_names = input$contact_names,
               verbose = FALSE
             )
+            # IMPORTANT: Custom Indicators FIRST, then Key Charts — see the
+            # auto handler above for the ordering rationale.
+            tryCatch({
+              sels <- lms_selections_data(); cd <- lms_catalog_data()
+              if (!is.null(sels) && length(sels) > 0L && !is.null(cd)) {
+                frag <- build_custom_indicators_xml(sels, cd$catalog, cd$periods, cd$path)
+                if (nzchar(frag)) append_custom_indicators(file, frag)
+              }
+            }, error = function(e) message("Custom indicators skipped: ", e$message))
             # append the configurable Key Charts page (native editable charts)
             tryCatch({
               configs <- .build_chart_configs()
@@ -2569,6 +2741,51 @@ server <- function(input, output, session) {
     series <- charts_preview_data()
     n <- if (is.null(series)) 0 else length(series)
     if (n == 0) 360 else 320 * ceiling(n / 2)
+  })
+
+  # render: custom indicators preview
+  output$lms_table_preview <- renderUI({
+    df <- lms_table_preview_data()
+    if (is.null(df) || nrow(df) == 0L) {
+      return(div(class = "govuk-hint", "No selections."))
+    }
+    tags$table(
+      style = "border-collapse:collapse; width:100%; font-size:13px; font-family:Arial,sans-serif;",
+      tags$thead(tags$tr(lapply(names(df), function(h)
+        tags$th(style = "padding:6px 8px; background:#1f3864; color:#fff; border:1px solid #fff; text-align:left;", h)))),
+      tags$tbody(lapply(seq_len(nrow(df)), function(i)
+        tags$tr(lapply(as.character(unlist(df[i, ])), function(v)
+          tags$td(style = "padding:6px 8px; border:1px solid #d0d0d0;", v))))))
+  })
+
+  output$lms_summary_preview <- renderUI({
+    sels <- lms_selections_data()
+    cd   <- lms_catalog_data()
+    if (is.null(sels) || length(sels) == 0L || is.null(cd)) {
+      return(div(class = "govuk-hint", "No summary lines."))
+    }
+    lines <- character(0)
+    for (sel in sels) {
+      if (!isTRUE(sel$summary)) next
+      crow <- cd$catalog[cd$catalog$cdid == sel$cdid, , drop = FALSE]
+      if (nrow(crow) == 0L) next
+      series <- lms_series(cd$catalog, cd$periods, cd$path, sel$cdid, sel$freq)
+      if (is.null(series) || nrow(series) == 0L) next
+      latest <- list(date = series$date[nrow(series)],
+                     value = series$value[nrow(series)],
+                     period_label = series$period_label[nrow(series)])
+      for (b in setdiff(sel$baselines, "current")) {
+        spec <- LMS_BASELINES[[b]]
+        if (is.null(spec) || !sel$freq %in% spec$applies) next
+        base <- lms_baseline_value(series, sel$freq, b, crow)
+        if (is.na(base$value)) next
+        line <- format_summary_line(crow, b, latest, base, sel$freq)
+        if (nzchar(line)) lines <- c(lines, line)
+      }
+    }
+    if (length(lines) == 0L) return(div(class = "govuk-hint", "No summary lines."))
+    tags$ul(style = "font-size:13px; line-height:1.5;",
+            lapply(lines, function(x) tags$li(x)))
   })
 
   # render: oecd preview
