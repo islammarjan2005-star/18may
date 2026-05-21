@@ -27,8 +27,10 @@ LMS_BASELINES <- list(
                   anchor = c(M = as.Date("2020-01-31"),
                              Q = as.Date("2019-12-31"),
                              A = as.Date("2019-12-31"))),
+  # Since-election baseline = Apr-Jun 2024 (Q2 2024), the last quarter before
+  # the Jul 2024 general election; that is the "May 2024" middle-month point.
   election = list(id = "election", label = "Since election",   applies = c("M","Q","A"),
-                  anchor = as.Date("2024-07-31"))
+                  anchor = as.Date("2024-05-31"))
 )
 
 .LMS_MONTH_LUT <- c(JAN=1, FEB=2, MAR=3, APR=4, MAY=5, JUN=6,
@@ -270,7 +272,8 @@ lms_series <- function(catalog, periods, path, cdid, freq) {
 # of the matching period. Uses an exact match for offset baselines; falls back
 # to nearest-within-tolerance for anchored baselines so cross-frequency anchors
 # still hit something sensible.
-lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL) {
+lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL,
+                               anchor_override = NULL) {
   na_out <- list(date = as.Date(NA), value = NA_real_, period_label = "\u2014")
   if (is.null(series) || nrow(series) == 0L) return(na_out)
   spec <- LMS_BASELINES[[baseline_id]]
@@ -284,7 +287,8 @@ lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL) {
                 period_label = series$period_label[nrow(series)]))
   }
 
-  target <- if (!is.null(spec$anchor)) {
+  target <- if (!is.null(anchor_override)) anchor_override
+            else if (!is.null(spec$anchor)) {
               a <- spec$anchor
               if (!is.null(names(a)) && freq %in% names(a)) a[[freq]] else a[[1]]
             } else .lms_last_day_of_offset_month(latest_date, spec$offset_months)
@@ -301,18 +305,22 @@ lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL) {
        period_label = series$period_label[nearest])
 }
 
-# The Covid baseline is the Dec 2019-Feb 2020 quarter. For LFS series that
-# only physically exists as the Feb 2020 point of the *monthly* (3-month
-# rolling) series, so always resolve "since Covid" from the monthly series
-# whatever frequency the analyst chose; fall back to the chosen frequency
-# only when the series has no monthly data at all.
+# The Covid baseline is the Dec 2019-Feb 2020 quarter. The monthly LFS series
+# is a 3-month rolling figure labelled by its MIDDLE month, so that quarter is
+# the "Jan 2020" point; resolve "since Covid" from the monthly series whatever
+# frequency the analyst chose, falling back to the chosen frequency only when a
+# series has no monthly data. Vacancies are the exception: the Vacancy Survey
+# reports on calendar quarters, so their pre-Covid baseline is Jan-Mar 2020 -
+# the "Feb 2020" monthly point, one month later.
 .lms_covid_base <- function(catalog, periods, path, cdid, crow, series, freq) {
+  is_vac <- !is.null(crow) && isTRUE(grepl("vacanc", crow$title, ignore.case = TRUE))
+  ov <- if (is_vac) as.Date("2020-02-29") else NULL
   mser <- if (identical(freq, "M")) series
           else tryCatch(lms_series(catalog, periods, path, cdid, "M"),
                         error = function(e) NULL)
   if (!is.null(mser) && nrow(mser) > 0L)
-    return(lms_baseline_value(mser, "M", "precovid", crow))
-  lms_baseline_value(series, freq, "precovid", crow)
+    return(lms_baseline_value(mser, "M", "precovid", crow, anchor_override = ov))
+  lms_baseline_value(series, freq, "precovid", crow, anchor_override = ov)
 }
 
 # ---- unit + formatting ------------------------------------------------------
