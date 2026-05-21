@@ -300,6 +300,20 @@ lms_baseline_value <- function(series, freq, baseline_id, catalog_row = NULL) {
        period_label = series$period_label[nearest])
 }
 
+# The Covid baseline is the Dec 2019-Feb 2020 quarter. For LFS series that
+# only physically exists as the Feb 2020 point of the *monthly* (3-month
+# rolling) series, so always resolve "since Covid" from the monthly series
+# whatever frequency the analyst chose; fall back to the chosen frequency
+# only when the series has no monthly data at all.
+.lms_covid_base <- function(catalog, periods, path, cdid, crow, series, freq) {
+  mser <- if (identical(freq, "M")) series
+          else tryCatch(lms_series(catalog, periods, path, cdid, "M"),
+                        error = function(e) NULL)
+  if (!is.null(mser) && nrow(mser) > 0L)
+    return(lms_baseline_value(mser, "M", "precovid", crow))
+  lms_baseline_value(series, freq, "precovid", crow)
+}
+
 # ---- unit + formatting ------------------------------------------------------
 
 .lms_is_rate <- function(catalog_row) {
@@ -419,7 +433,9 @@ build_custom_preview_df <- function(selections, catalog, periods, path) {
       if (!b %in% sel$baselines) return("\u2014")
       spec <- LMS_BASELINES[[b]]
       if (!sel$freq %in% spec$applies) return("\u2014")
-      base <- lms_baseline_value(series, sel$freq, b, crow)
+      base <- if (b == "precovid")
+                .lms_covid_base(catalog, periods, path, sel$cdid, crow, series, sel$freq)
+              else lms_baseline_value(series, sel$freq, b, crow)
       if (is.na(base$value)) return("\u2014")
       .lms_format_delta(latest$value - base$value, is_rate)
     }, "")
@@ -452,7 +468,9 @@ lms_summary_lines <- function(selections, catalog, periods, path) {
     for (b in setdiff(sel$baselines, "current")) {
       spec <- LMS_BASELINES[[b]]
       if (is.null(spec) || !sel$freq %in% spec$applies) next
-      base <- lms_baseline_value(series, sel$freq, b, crow)
+      base <- if (b == "precovid")
+                .lms_covid_base(catalog, periods, path, sel$cdid, crow, series, sel$freq)
+              else lms_baseline_value(series, sel$freq, b, crow)
       if (is.na(base$value)) next
       line <- format_summary_line(crow, b, latest, base, sel$freq)
       if (!nzchar(line)) next
@@ -641,7 +659,9 @@ build_custom_audit <- function(selections, catalog, periods, path, line_keys = N
     g_lper[i] <- series$period_label[last]; g_cur[i] <- series$value[last]
     for (b in change_ids) {
       if (!b %in% sel$baselines || !sel$freq %in% LMS_BASELINES[[b]]$applies) next
-      base <- lms_baseline_value(series, sel$freq, b, crow)
+      base <- if (b == "precovid")
+                .lms_covid_base(catalog, periods, path, sel$cdid, crow, series, sel$freq)
+              else lms_baseline_value(series, sel$freq, b, crow)
       if (!is.na(base$value)) chg[i, b] <- series$value[last] - base$value
     }
   }
