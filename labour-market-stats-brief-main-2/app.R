@@ -2294,7 +2294,7 @@ server <- function(input, output, session) {
                           checkboxInput(paste0("lms_", cdid, "_bl_all"),
                                         "Select all", value = TRUE))),
                   checkboxGroupInput(paste0("lms_", cdid, "_baselines"), label = NULL,
-                                     choices = bl_choices, selected = names(bl_choices),
+                                     choices = bl_choices, selected = unname(bl_choices),
                                      inline = TRUE))))
     })
     do.call(tagList, Filter(Negate(is.null), rows))
