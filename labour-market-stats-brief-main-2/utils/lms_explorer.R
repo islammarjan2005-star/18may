@@ -525,6 +525,27 @@ format_summary_line <- function(catalog_row, baseline_id, latest, base, freq) {
   ""
 }
 
+# Tiny inline-SVG sparkline of a numeric series (no packages). Scales the
+# available points across the box and dots the latest value. Returns "" for
+# series too short to plot.
+.lms_sparkline_svg <- function(values, width = 130L, height = 26L,
+                               stroke = "#1F4E79", dot = "#d4351c") {
+  v <- values[!is.na(values)]
+  n <- length(v); if (n < 2L) return("")
+  pad <- 2
+  rng <- range(v); span <- rng[2] - rng[1]
+  xs <- pad + (seq_len(n) - 1) / (n - 1) * (width - 2 * pad)
+  ys <- if (span == 0) rep(height / 2, n)
+        else (height - pad) - (v - rng[1]) / span * (height - 2 * pad)
+  pts <- paste(sprintf("%.1f,%.1f", xs, ys), collapse = " ")
+  sprintf(paste0(
+    '<svg width="%d" height="%d" viewBox="0 0 %d %d" preserveAspectRatio="none" ',
+    'style="display:block;"><polyline points="%s" fill="none" stroke="%s" ',
+    'stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>',
+    '<circle cx="%.1f" cy="%.1f" r="1.8" fill="%s"/></svg>'),
+    width, height, width, height, pts, stroke, xs[n], ys[n], dot)
+}
+
 # ---- preview data frame (used in-app) --------------------------------------
 
 # Returns a data.frame with cols: Series, "Latest period", "Latest value",

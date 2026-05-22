@@ -2279,8 +2279,24 @@ server <- function(input, output, session) {
         }
       }
 
+      # mini trend sparkline + latest value (off the cached matrix, instant)
+      sl <- tryCatch(lms_series(cd$catalog, cd$periods, cd$path, cdid, default_freq),
+                     error = function(e) NULL)
+      spark <- if (!is.null(sl) && nrow(sl) >= 2L) .lms_sparkline_svg(sl$value) else ""
+      latest_lbl <- ""
+      if (!is.null(sl) && nrow(sl) >= 1L) {
+        ir <- .lms_is_rate(crow); lv <- sl$value[nrow(sl)]
+        latest_lbl <- paste0(.lms_format_value(lv, ir), if (ir) "%" else "",
+                             " (", sl$period_label[nrow(sl)], ")")
+      }
+
       div(style = "border-bottom:1px solid #e3e3e3; padding:10px 0;",
-          tags$strong(cdid), " | ", crow$title,
+          div(style = "display:flex; justify-content:space-between; align-items:flex-start; gap:12px;",
+              div(style = "flex:1 1 auto; min-width:0;", tags$strong(cdid), " | ", crow$title),
+              if (nzchar(spark))
+                div(style = "flex:0 0 auto; text-align:right;",
+                    HTML(spark),
+                    div(style = "font-size:80%; color:#505050; white-space:nowrap;", latest_lbl))),
           fam_ui,
           div(style = "display:flex; flex-wrap:wrap; gap:10px; padding-left:8px; margin-top:6px;",
               div(style = "min-width:140px;",
