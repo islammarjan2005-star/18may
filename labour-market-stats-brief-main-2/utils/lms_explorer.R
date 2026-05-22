@@ -220,29 +220,52 @@ parse_lms_catalog <- function(path) {
 
 # ---- per-series reader ------------------------------------------------------
 
-# Read just one column from the LMS file, filter to the requested frequency,
-# drop NA values. Returns df(date, value, period_label) sorted by date.
+# Transparent in-memory cache of LMS data columns, keyed by file path. Reading
+# a single column from the 10 MB workbook costs ~1s (readxl reopens the zip
+# each time), so lms_preload() reads the whole sheet once (~3s) into a numeric
+# matrix and every later lookup is instant. Without a preload the accessor
+# falls back to reading just the requested column.
+.LMS_DATA_CACHE <- new.env(parent = emptyenv())
+
+lms_preload <- function(path) {
+  d <- tryCatch(suppressMessages(readxl::read_excel(
+         path, sheet = "data", col_names = FALSE, .name_repair = "minimal")),
+       error = function(e) NULL)
+  if (is.null(d) || nrow(d) == 0L) return(invisible(FALSE))
+  m <- suppressWarnings(matrix(as.numeric(as.matrix(d)), nrow = nrow(d)))
+  assign(path, m, envir = .LMS_DATA_CACHE)
+  invisible(TRUE)
+}
+
+.lms_col_numeric <- function(path, col_index, max_row = 1553L) {
+  if (exists(path, envir = .LMS_DATA_CACHE, inherits = FALSE)) {
+    m <- get(path, envir = .LMS_DATA_CACHE)
+    if (col_index > ncol(m)) return(numeric(0))
+    return(m[, col_index])
+  }
+  letter <- .lms_col_letter(col_index)
+  vals <- tryCatch(
+    suppressMessages(readxl::read_excel(
+      path, sheet = "data", range = paste0(letter, "1:", letter, max_row),
+      col_names = FALSE, .name_repair = "minimal")),
+    error = function(e) NULL)
+  if (is.null(vals) || nrow(vals) == 0L) return(numeric(0))
+  suppressWarnings(as.numeric(unlist(vals[[1]])))
+}
+
+# Read one series column, filter to the requested frequency, drop NA values.
+# Returns df(date, value, period_label) sorted by date.
 lms_series <- function(catalog, periods, path, cdid, freq) {
   j <- catalog$col_index[catalog$cdid == cdid]
   if (length(j) == 0L) return(NULL)
-  j <- j[1]
-  letter <- .lms_col_letter(j)
-
-  vals <- tryCatch(
-    suppressMessages(readxl::read_excel(
-      path, sheet = "data",
-      range = paste0(letter, "1:", letter, "1553"),
-      col_names = FALSE, .name_repair = "minimal")),
-    error = function(e) NULL)
-  if (is.null(vals) || nrow(vals) == 0L) return(NULL)
-  v <- suppressWarnings(as.numeric(unlist(vals[[1]])))
+  v <- .lms_col_numeric(path, j[1])
+  if (length(v) == 0L) return(NULL)
 
   per_sub <- periods[periods$freq == freq, , drop = FALSE]
   if (nrow(per_sub) == 0L) {
     return(data.frame(date = as.Date(character(0)), value = numeric(0),
                       period_label = character(0), stringsAsFactors = FALSE))
   }
-
   rows_ok <- per_sub$row <= length(v)
   per_sub <- per_sub[rows_ok, , drop = FALSE]
   vals_at <- v[per_sub$row]
@@ -258,10 +281,15 @@ lms_series <- function(catalog, periods, path, cdid, freq) {
 
 # Which frequencies does this CDID actually have at least one value in?
 .lms_avail_freqs <- function(lms_data, cdid) {
-  res <- character(0)
+  j <- lms_data$catalog$col_index[lms_data$catalog$cdid == cdid]
+  if (length(j) == 0L) return(character(0))
+  v <- .lms_col_numeric(lms_data$path, j[1])
+  if (length(v) == 0L) return(character(0))
+  periods <- lms_data$periods; res <- character(0)
   for (f in c("M","Q","A")) {
-    s <- lms_series(lms_data$catalog, lms_data$periods, lms_data$path, cdid, f)
-    if (!is.null(s) && nrow(s) > 0L) res <- c(res, f)
+    rows <- periods$row[periods$freq == f]
+    rows <- rows[rows <= length(v)]
+    if (length(rows) > 0L && any(!is.na(v[rows]))) res <- c(res, f)
   }
   res
 }

@@ -693,6 +693,10 @@ ui <- fluidPage(
                                          choices = NULL, multiple = FALSE, width = "100%",
                                          options = list(placeholder = "Type a metric to find its breakdown families...",
                                                         maxOptions = 25)),
+                          conditionalPanel(
+                            condition = "input.lms_pick && input.lms_pick.length > 0",
+                            div(style = "text-align:right; margin:-4px 0 6px;",
+                                actionLink("lms_clear", "Clear all selected series"))),
                           uiOutput("lms_settings_rows"),
                           div(style = "margin-top:18px;",
                               actionButton("regenerate_custom", "Refresh preview",
@@ -943,6 +947,9 @@ server <- function(input, output, session) {
         res <- tryCatch(parse_lms_catalog(files$datapath[i]),
                         error = function(e) list(ok = FALSE, warn = conditionMessage(e)))
         if (isTRUE(res$ok)) {
+          # read the whole sheet into memory once so later lookups are instant
+          withProgress(message = "Loading LMS data into memory...", value = 0.5,
+                       lms_preload(files$datapath[i]))
           fams <- tryCatch(lms_build_families(res$catalog),
                            error = function(e) list(families = list(), fam_of = NULL))
           lms_catalog_data(list(catalog = res$catalog, periods = res$periods,
@@ -2342,6 +2349,12 @@ server <- function(input, output, session) {
     showNotification(sprintf("Added %d series from '%s'.", length(added), fam$label),
                      type = "message", duration = 3)
   }, ignoreNULL = TRUE)
+
+  # clear the whole selection in one go (avoids deleting chips one by one)
+  observeEvent(input$lms_clear, {
+    updateSelectizeInput(session, "lms_pick", selected = character(0))
+    updateSelectizeInput(session, "lms_family_pick", selected = character(0))
+  })
 
   observeEvent(input$regenerate_custom, {
     cd <- lms_catalog_data()
