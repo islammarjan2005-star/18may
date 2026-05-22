@@ -501,6 +501,30 @@ format_summary_line <- function(catalog_row, baseline_id, latest, base, freq) {
           title, verb, abs_s, phrase, per, prev_s, cur_s)
 }
 
+# Historical context for the latest value: where it sits in the whole series.
+# Returns e.g. "the highest since Aug 2021", "the lowest since 2013", or for a
+# series extreme "the highest since 1971"; "" when the latest value is not a
+# notable (>= ~1 year) high or low. Computed off the full series held in memory.
+.lms_context_clause <- function(series, freq) {
+  n <- if (is.null(series)) 0L else nrow(series)
+  if (n < 6L) return("")
+  v <- series$value; labs <- series$period_label; cur <- v[n]
+  if (is.na(cur)) return("")
+  earlier <- v[seq_len(n - 1L)]
+  if (all(is.na(earlier))) return("")
+  min_span <- switch(freq, M = 12L, Q = 4L, A = 3L, 12L)
+  yr <- function(lbl) { m <- regmatches(lbl, regexpr("[0-9]{4}", lbl)); if (length(m)) m else lbl }
+
+  hi_idx <- suppressWarnings(max(which(earlier >= cur)))   # most recent >= current
+  lo_idx <- suppressWarnings(max(which(earlier <= cur)))   # most recent <= current
+  if (!is.finite(hi_idx)) return(sprintf("the highest since %s", yr(labs[1])))  # series high
+  if (!is.finite(lo_idx)) return(sprintf("the lowest since %s",  yr(labs[1])))  # series low
+  hi_span <- n - hi_idx; lo_span <- n - lo_idx
+  if (hi_span >= lo_span && hi_span >= min_span) return(sprintf("the highest since %s", labs[hi_idx]))
+  if (lo_span >  hi_span && lo_span >= min_span) return(sprintf("the lowest since %s",  labs[lo_idx]))
+  ""
+}
+
 # ---- preview data frame (used in-app) --------------------------------------
 
 # Returns a data.frame with cols: Series, "Latest period", "Latest value",
@@ -575,6 +599,7 @@ lms_summary_lines <- function(selections, catalog, periods, path) {
     latest <- list(date = series$date[nrow(series)],
                    value = series$value[nrow(series)],
                    period_label = series$period_label[nrow(series)])
+    ctx <- .lms_context_clause(series, sel$freq)   # "the highest since ..." etc.
     for (b in setdiff(sel$baselines, "current")) {
       spec <- LMS_BASELINES[[b]]
       if (is.null(spec) || !sel$freq %in% spec$applies) next
@@ -584,6 +609,7 @@ lms_summary_lines <- function(selections, catalog, periods, path) {
       if (is.na(base$value)) next
       line <- format_summary_line(crow, b, latest, base, sel$freq)
       if (!nzchar(line)) next
+      if (nzchar(ctx)) line <- paste0(sub("\\.\\s*$", "", line), ", ", ctx, ".")
       out[[length(out) + 1L]] <- list(
         key = paste0(sel$cdid, "|", b), cdid = sel$cdid,
         baseline = b, text = line)
