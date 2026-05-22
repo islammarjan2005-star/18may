@@ -876,9 +876,6 @@ lms_notable_signals <- function(catalog, periods, path, families = NULL,
   yhz  <- c(M = 12L, Q = 4L, A = 1L)
   ld   <- list(catalog = catalog, periods = periods, path = path)
   max_date <- suppressWarnings(max(periods$date, na.rm = TRUE))
-  regions <- paste0("North East|North West|Yorkshire|East Midlands|West Midlands|",
-                    "East of England|London|South East|South West|\\bWales\\b|",
-                    "\\bScotland\\b|Northern Ireland")
   recs <- list()
   for (i in seq_len(nrow(catalog))) {
     cdid <- catalog$cdid[i]
@@ -895,24 +892,13 @@ lms_notable_signals <- function(catalog, periods, path, families = NULL,
     scale <- stats::mad(dy, constant = 1.4826)
     if (!is.finite(scale) || scale < 1e-9) scale <- stats::sd(dy)
     if (!is.finite(scale) || scale < 1e-9) next
+    # Pure signal: how unusual is the latest year-on-year move vs the series'
+    # own history. No penalties, no extreme bonus - just the robust z-score.
     z <- abs(latest_dy - stats::median(dy)) / scale
     crow <- catalog[i, , drop = FALSE]; ttl <- crow$title
     is_rate <- .lms_is_rate(crow)
     ctx <- .lms_context_clause(s, fr)
-    # Extreme bonus: reward genuinely notable extremes - rate records / multi-year
-    # highs OR lows, and level *lows* (a fall to a multi-year low) - but NOT level
-    # highs, which just track population growth. Scaled by how far back the
-    # extreme reaches (years), capped so it boosts rather than dominates z.
-    cur <- v[n]; earlier <- v[1:(n - 1L)]
-    hi <- suppressWarnings(max(which(earlier >= cur)))
-    lo <- suppressWarnings(max(which(earlier <= cur)))
-    hi_yrs <- (if (is.finite(hi)) n - hi else n) / h
-    lo_yrs <- (if (is.finite(lo)) n - lo else n) / h
-    ex_bonus <- if (is_rate) { sp <- max(hi_yrs, lo_yrs); if (sp >= 1) min(sp, 10) * 0.3 else 0 }
-                else        { if (lo_yrs >= 1) min(lo_yrs, 10) * 0.25 else 0 }
-    penalty <- 1.2 * grepl(regions, ttl) +
-               0.6 * grepl("(: |\\b)(Male|Female|Men|Women)\\b", ttl)
-    score <- z + ex_bonus - penalty
+    score <- z
     dir <- if (latest_dy > 0) "rose" else if (latest_dy < 0) "fell" else "was flat"
     amt <- .lms_format_value(abs(latest_dy), is_rate); if (is_rate) amt <- paste0(amt, " pp")
     headline <- sprintf("%s: %s %s on the year to %s (%.1fx its usual move%s)",
