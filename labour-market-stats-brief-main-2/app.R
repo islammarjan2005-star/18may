@@ -2147,7 +2147,11 @@ server <- function(input, output, session) {
                                 choices = yrs, selected = as.character(cur_yr), width = "100%")),
                 div(style = "min-width:170px;",
                     selectInput(paste0("chart_", id, "_smoothing"), "Smoothing",
-                                choices = smooth_choices, selected = "raw", width = "100%")))))
+                                choices = smooth_choices, selected = "raw", width = "100%")),
+                div(style = "min-width:200px;",
+                    selectInput(paste0("chart_", id, "_labels"), "Label points",
+                                choices = c("Latest" = "latest", "Highest" = "highest", "Lowest" = "lowest"),
+                                selected = "latest", multiple = TRUE, width = "100%")))))
     })
     do.call(tagList, rows)
   })
@@ -2188,7 +2192,11 @@ server <- function(input, output, session) {
                               choices = yrs, selected = as.character(cur_yr), width = "100%")),
               div(style = "min-width:160px;",
                   selectInput(paste0("chart_lms_", cdid, "_smoothing"), "Smoothing",
-                              choices = smooth_choices, selected = "raw", width = "100%"))))
+                              choices = smooth_choices, selected = "raw", width = "100%")),
+              div(style = "min-width:200px;",
+                  selectInput(paste0("chart_lms_", cdid, "_labels"), "Label points",
+                              choices = c("Latest" = "latest", "Highest" = "highest", "Lowest" = "lowest"),
+                              selected = "latest", multiple = TRUE, width = "100%"))))
     })
     do.call(tagList, Filter(Negate(is.null), rows))
   })
@@ -2203,7 +2211,8 @@ server <- function(input, output, session) {
         type      = input[[paste0("chart_", m$id, "_type")]] %||% m$type,
         year_from = suppressWarnings(as.integer(input[[paste0("chart_", m$id, "_from")]])),
         year_to   = suppressWarnings(as.integer(input[[paste0("chart_", m$id, "_to")]])),
-        smoothing = input[[paste0("chart_", m$id, "_smoothing")]] %||% "raw"
+        smoothing = input[[paste0("chart_", m$id, "_smoothing")]] %||% "raw",
+        labels    = input[[paste0("chart_", m$id, "_labels")]] %||% "latest"
       )
     }
     # LMS-series charts (added via the search box, src = "lms")
@@ -2215,7 +2224,8 @@ server <- function(input, output, session) {
         type      = input[[paste0("chart_lms_", cdid, "_type")]] %||% "line",
         year_from = suppressWarnings(as.integer(input[[paste0("chart_lms_", cdid, "_from")]])),
         year_to   = suppressWarnings(as.integer(input[[paste0("chart_lms_", cdid, "_to")]])),
-        smoothing = input[[paste0("chart_lms_", cdid, "_smoothing")]] %||% "raw"
+        smoothing = input[[paste0("chart_lms_", cdid, "_smoothing")]] %||% "raw",
+        labels    = input[[paste0("chart_lms_", cdid, "_labels")]] %||% "latest"
       )
     }
     configs

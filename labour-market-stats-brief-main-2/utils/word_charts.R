@@ -337,9 +337,58 @@ build_chart_series <- function(chart_configs, flow, sources) {
       next
     }
     sm <- .wc_smooth(s$cat[keep], s$val[keep], s$year[keep], sm_kind)
-    charts[[length(charts) + 1]] <- c(base_chart, list(cat = sm$cat, val = sm$val))
+    charts[[length(charts) + 1]] <- c(base_chart, list(
+      cat = sm$cat, val = sm$val,
+      dlbls = .wc_compute_dlbls(sm$val, cfg$labels, base_chart$type, base_chart$unit)))
   }
   charts
+}
+
+# Decide which points to put a numeric data label on, like the SSOT key charts:
+# the latest value always, plus the highest / lowest if requested. Returns
+# list(items = list(list(idx, pos)), numfmt) with 0-based indices.
+.wc_compute_dlbls <- function(val, labels, type, unit) {
+  if (is.null(labels) || length(labels) == 0L) labels <- "latest"
+  n <- length(val); if (n == 0L) return(list(items = list(), numfmt = "0.0"))
+  numfmt   <- if (identical(unit, "%")) "0.0" else "#,##0"
+  pos_line <- c(latest = "r", highest = "t", lowest = "b")
+  items <- list(); seen <- integer(0)
+  add <- function(idx, kind) {
+    if (length(idx) != 1L || is.na(idx) || idx < 1L || idx > n || is.na(val[idx])) return()
+    if ((idx - 1L) %in% seen) return()                       # dedupe (e.g. latest == highest)
+    pos <- if (identical(type, "bar")) "outEnd"
+           else if (identical(type, "area")) ""              # area: let Word auto-place
+           else if (kind %in% names(pos_line)) pos_line[[kind]] else "t"
+    items[[length(items) + 1L]] <<- list(idx = idx - 1L, pos = pos)
+    seen <<- c(seen, idx - 1L)
+  }
+  if ("latest"  %in% labels) { nz <- which(!is.na(val)); if (length(nz)) add(nz[length(nz)], "latest") }
+  if ("highest" %in% labels) add(which.max(val), "highest")
+  if ("lowest"  %in% labels) add(which.min(val), "lowest")
+  items <- items[order(vapply(items, `[[`, 0L, "idx"))]     # ascending idx order
+  list(items = items, numfmt = numfmt)
+}
+
+# Series-level <c:dLbls> showing only the chosen points (value only, bold).
+.wc_dlbls_xml <- function(dlbls) {
+  if (is.null(dlbls) || length(dlbls$items) == 0L) return("")
+  nf <- dlbls$numfmt
+  shows <- paste0('<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/>',
+                  '<c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/>')
+  txpr  <- paste0('<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1000" b="1"/>',
+                  '</a:pPr><a:endParaRPr lang="en-GB"/></a:p></c:txPr>')
+  per <- vapply(dlbls$items, function(d) {
+    posxml <- if (nzchar(d$pos)) sprintf('<c:dLblPos val="%s"/>', d$pos) else ""
+    paste0('<c:dLbl><c:idx val="', d$idx, '"/>',
+           '<c:numFmt formatCode="', nf, '" sourceLinked="0"/>',
+           '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>', txpr, posxml, shows,
+           '</c:dLbl>')
+  }, "")
+  paste0('<c:dLbls>', paste(per, collapse = ""),
+         '<c:numFmt formatCode="', nf, '" sourceLinked="0"/>',
+         '<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>', txpr,
+         '<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/>',
+         '<c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>')
 }
 
 # Database flow: fetch only the tables the selected metrics need (one query
@@ -460,6 +509,9 @@ build_chart_xml <- function(chart) {
          else                                    .WC_LINE_TEMPLATE
   out <- gsub("__SERIES_NAME__",   .wc_xml_escape(chart$label),                 out, fixed = TRUE)
   out <- gsub("__SERIES_COLOUR__", chart$colour,                                out, fixed = TRUE)
+  dl  <- .wc_dlbls_xml(chart$dlbls)
+  if (nzchar(dl)) out <- sub("<c:cat>__CAT_CACHE__", paste0(dl, "<c:cat>__CAT_CACHE__"),
+                             out, fixed = TRUE)
   out <- gsub("__CAT_CACHE__",     .wc_cat_cache(chart$cat),                    out, fixed = TRUE)
   out <- gsub("__VAL_CACHE__",     .wc_val_cache(chart$val),                    out, fixed = TRUE)
   out
