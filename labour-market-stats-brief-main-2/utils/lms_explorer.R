@@ -862,20 +862,27 @@ build_custom_audit <- function(selections, catalog, periods, path, line_keys = N
 
 # ---- notable signals --------------------------------------------------------
 
-# Scan the whole catalogue and rank series by how UNUSUAL their latest
-# year-on-year move is versus their own history (robust z = |dy - median|/MAD),
-# boosted when the latest value is also a record/multi-year extreme, and
-# down-weighted for granular breakdowns (deep titles, region/sex cuts) so the
-# priority list leads with headline aggregates rather than small-sample noise.
-# Collapses to one signal per breakdown family. The LMS file has no standard
-# errors, so this is "unusual vs own history", not statistical significance.
-# Returns a ranked data.frame: cdid, title, freq, z, score, dir, headline.
+# Score every series on TWO transparent, unblended measures of its latest
+# year-on-year move, leaving sort/scope/collapse to the caller:
+#   z       how unusual the move is vs the series' own history
+#           (robust |dy - median(dy)| / MAD). Pure - no penalties.
+#   ex_yrs  how far back the current high/low streak reaches (years), as a
+#           record / multi-year extreme signal. Counts rate highs OR lows and
+#           level *lows*; level *highs* are ignored (counts trivially set records
+#           as the population grows). 0 = not at a notable extreme.
+# Also flags region / by-sex breakdowns (is_breakdown) for an optional scope
+# filter. Returns the full frame (recency-filtered, one row per series). The LMS
+# file has no standard errors, so this is "unusual vs own history", not formal
+# statistical significance.
 lms_notable_signals <- function(catalog, periods, path, families = NULL,
-                                top_n = 25L, min_obs = 24L, recency_days = 548L) {
+                                min_obs = 24L, recency_days = 548L) {
   flab <- c(M = "Monthly", Q = "Quarterly", A = "Annual")
   yhz  <- c(M = 12L, Q = 4L, A = 1L)
   ld   <- list(catalog = catalog, periods = periods, path = path)
   max_date <- suppressWarnings(max(periods$date, na.rm = TRUE))
+  bd_re <- paste0("North East|North West|Yorkshire|East Midlands|West Midlands|",
+                  "East of England|London|South East|South West|\\bWales\\b|",
+                  "\\bScotland\\b|Northern Ireland|(: |\\b)(Male|Female|Men|Women)\\b")
   recs <- list()
   for (i in seq_len(nrow(catalog))) {
     cdid <- catalog$cdid[i]
@@ -892,28 +899,32 @@ lms_notable_signals <- function(catalog, periods, path, families = NULL,
     scale <- stats::mad(dy, constant = 1.4826)
     if (!is.finite(scale) || scale < 1e-9) scale <- stats::sd(dy)
     if (!is.finite(scale) || scale < 1e-9) next
-    # Pure signal: how unusual is the latest year-on-year move vs the series'
-    # own history. No penalties, no extreme bonus - just the robust z-score.
     z <- abs(latest_dy - stats::median(dy)) / scale
-    crow <- catalog[i, , drop = FALSE]; ttl <- crow$title
-    is_rate <- .lms_is_rate(crow)
-    ctx <- .lms_context_clause(s, fr)
-    score <- z
+
+    crow <- catalog[i, , drop = FALSE]; ttl <- crow$title; is_rate <- .lms_is_rate(crow)
+    cur <- v[n]; e <- v[1:(n - 1L)]
+    hi <- suppressWarnings(max(which(e >= cur))); lo <- suppressWarnings(max(which(e <= cur)))
+    hi_rec <- !is.finite(hi); lo_rec <- !is.finite(lo)
+    hi_yrs <- (if (hi_rec) n else n - hi) / h
+    lo_yrs <- (if (lo_rec) n else n - lo) / h
+    if (is_rate) {
+      if (hi_yrs >= lo_yrs) { ex_yrs <- hi_yrs; ex_kind <- "high"; ex_rec <- hi_rec }
+      else                  { ex_yrs <- lo_yrs; ex_kind <- "low";  ex_rec <- lo_rec }
+    } else if (lo_yrs > hi_yrs) { ex_yrs <- lo_yrs; ex_kind <- "low"; ex_rec <- lo_rec }
+    else                        { ex_yrs <- 0;      ex_kind <- "none"; ex_rec <- FALSE }
+    if (ex_yrs < 1) { ex_yrs <- 0; ex_kind <- "none"; ex_rec <- FALSE }
+
     dir <- if (latest_dy > 0) "rose" else if (latest_dy < 0) "fell" else "was flat"
     amt <- .lms_format_value(abs(latest_dy), is_rate); if (is_rate) amt <- paste0(amt, " pp")
-    headline <- sprintf("%s: %s %s on the year to %s (%.1fx its usual move%s)",
-                        ttl, dir, amt, s$period_label[n], z,
-                        if (nzchar(ctx)) paste0("; ", ctx) else "")
+    headline <- sprintf("%s: %s %s on the year to %s", ttl, dir, amt, s$period_label[n])
     fkey <- if (!is.null(families) && !is.na(families$fam_of[cdid]))
               paste0("F", families$fam_of[cdid]) else cdid
     recs[[length(recs) + 1L]] <- data.frame(
-      cdid = cdid, title = ttl, freq = flab[[fr]], z = z, score = score,
-      dir = dir, headline = headline, fkey = fkey, stringsAsFactors = FALSE)
+      cdid = cdid, title = ttl, freq = flab[[fr]], z = z,
+      ex_yrs = ex_yrs, ex_kind = ex_kind, ex_rec = ex_rec,
+      is_breakdown = grepl(bd_re, ttl), dir = dir, headline = headline,
+      fkey = fkey, stringsAsFactors = FALSE)
   }
   if (length(recs) == 0L) return(data.frame())
-  df <- do.call(rbind, recs)
-  df <- df[order(-df$score), , drop = FALSE]
-  df <- df[!duplicated(df$fkey), , drop = FALSE]
-  df$fkey <- NULL
-  utils::head(df, top_n)
+  do.call(rbind, recs)
 }

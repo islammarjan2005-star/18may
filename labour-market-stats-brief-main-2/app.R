@@ -700,6 +700,13 @@ ui <- fluidPage(
                               "the LMS file has no standard errors."),
                           actionButton("lms_scan_signals", "Scan for notable signals",
                                        class = "govuk-button govuk-button--blue", style = "width:100%;"),
+                          div(style = "display:flex; flex-wrap:wrap; gap:18px; align-items:center; margin-top:10px;",
+                              radioButtons("lms_sig_sort", "Rank by",
+                                           choices = c("Most unusual move (z-score)" = "unusual",
+                                                       "At a record / multi-year extreme" = "extreme"),
+                                           selected = "unusual", inline = TRUE),
+                              checkboxInput("lms_sig_scope",
+                                            "Exclude regional & by-sex breakdowns", FALSE)),
                           uiOutput("lms_signals_list")))),
                 div(class = "dashboard-card", id = "custom_indicators_card",
                     div(class = "dashboard-card__header", "Custom Indicators Preview"),
@@ -2335,14 +2342,14 @@ server <- function(input, output, session) {
   outputOptions(output, "lms_loaded", suspendWhenHidden = FALSE)
 
   # ---- Notable signals: scan, rank, copy-in --------------------------------
-  lms_signals_data <- reactiveVal(NULL)
+  lms_signals_data <- reactiveVal(NULL)   # full scored frame (set on scan)
 
   observeEvent(input$lms_scan_signals, {
     cd <- lms_catalog_data()
     if (is.null(cd)) { showNotification("Upload the LMS file first", type = "warning"); return() }
     withProgress(message = "Scanning for notable signals...", value = 0.4, {
       sig <- tryCatch(
-        lms_notable_signals(cd$catalog, cd$periods, cd$path, cd$families, top_n = 25L),
+        lms_notable_signals(cd$catalog, cd$periods, cd$path, cd$families),
         error = function(e) {
           showNotification(paste("Scan error:", e$message), type = "error"); NULL
         })
@@ -2350,20 +2357,42 @@ server <- function(input, output, session) {
     })
   })
 
-  output$lms_signals_list <- renderUI({
+  # Apply the analyst's chosen lens to the scored frame: optional scope filter,
+  # sort (unusual = z, extreme = record-length then z), family-collapse, top 25.
+  lms_signals_view <- reactive({
     sig <- lms_signals_data()
+    if (is.null(sig) || nrow(sig) == 0L) return(sig)
+    if (isTRUE(input$lms_sig_scope)) sig <- sig[!sig$is_breakdown, , drop = FALSE]
+    sig <- if (identical(input$lms_sig_sort, "extreme"))
+             sig[order(-sig$ex_yrs, -sig$z), , drop = FALSE]
+           else sig[order(-sig$z), , drop = FALSE]
+    sig <- sig[!duplicated(sig$fkey), , drop = FALSE]
+    utils::head(sig, 25L)
+  })
+
+  output$lms_signals_list <- renderUI({
+    sig <- lms_signals_view()
     if (is.null(sig)) return(NULL)
     if (nrow(sig) == 0L)
       return(div(class = "govuk-hint", style = "margin-top:10px;", "No notable signals found."))
     picks <- input$lms_pick
+    badge <- function(txt, bg) tags$span(
+      style = paste0("display:inline-block; font-size:80%; font-weight:700; padding:1px 7px; ",
+                     "border-radius:9px; margin-left:6px; white-space:nowrap; background:", bg, ";"), txt)
     rows <- lapply(seq_len(nrow(sig)), function(i) {
       cdid <- sig$cdid[i]
       col  <- if (identical(sig$dir[i], "rose")) "#006100"
               else if (identical(sig$dir[i], "fell")) "#9C0006" else "#505050"
+      ex <- if (sig$ex_kind[i] != "none") {
+        lbl <- if (isTRUE(sig$ex_rec[i])) paste0("record ", sig$ex_kind[i])
+               else sprintf("%d-yr %s", round(sig$ex_yrs[i]), sig$ex_kind[i])
+        badge(lbl, "#fdecef")
+      }
       div(style = "display:flex; align-items:flex-start; gap:10px; border-bottom:1px solid #eee; padding:7px 0;",
           div(style = "flex:0 0 26px; font-weight:700; color:#1F4E79;", paste0(i, ".")),
           div(style = "flex:1 1 auto; min-width:0;",
-              tags$span(style = paste0("color:", col, ";"), sig$headline[i])),
+              tags$span(style = paste0("color:", col, ";"), sig$headline[i]),
+              badge(sprintf("z %.1f", sig$z[i]), "#eef3fb"), ex),
           div(style = "flex:0 0 auto;",
               if (cdid %in% picks) tags$em(style = "color:#006100;", "added")
               else actionButton(paste0("lms_sig_add_", cdid), "Add",
@@ -2373,10 +2402,10 @@ server <- function(input, output, session) {
     div(style = "margin-top:10px;", do.call(tagList, rows))
   })
 
-  # Register each signal's "Add" button once (per CDID), like the family-add path.
+  # Register each shown signal's "Add" button once (per CDID), like family-add.
   lms_sig_registered <- reactiveVal(character(0))
-  observeEvent(lms_signals_data(), {
-    sig <- lms_signals_data(); if (is.null(sig) || nrow(sig) == 0L) return()
+  observeEvent(lms_signals_view(), {
+    sig <- lms_signals_view(); if (is.null(sig) || nrow(sig) == 0L) return()
     reg <- lms_sig_registered(); new <- setdiff(sig$cdid, reg)
     for (cdid in new) {
       local({
