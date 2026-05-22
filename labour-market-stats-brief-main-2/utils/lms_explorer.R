@@ -859,3 +859,66 @@ build_custom_audit <- function(selections, catalog, periods, path, line_keys = N
          "Every figure traces to the uploaded LMS file -> CDID -> period. ",
          "LMS release: ", rel, "."))
 }
+
+# ---- notable signals --------------------------------------------------------
+
+# Scan the whole catalogue and rank series by how UNUSUAL their latest
+# year-on-year move is versus their own history (robust z = |dy - median|/MAD),
+# boosted when the latest value is also a record/multi-year extreme, and
+# down-weighted for granular breakdowns (deep titles, region/sex cuts) so the
+# priority list leads with headline aggregates rather than small-sample noise.
+# Collapses to one signal per breakdown family. The LMS file has no standard
+# errors, so this is "unusual vs own history", not statistical significance.
+# Returns a ranked data.frame: cdid, title, freq, z, score, dir, headline.
+lms_notable_signals <- function(catalog, periods, path, families = NULL,
+                                top_n = 25L, min_obs = 24L, recency_days = 548L) {
+  flab <- c(M = "Monthly", Q = "Quarterly", A = "Annual")
+  yhz  <- c(M = 12L, Q = 4L, A = 1L)
+  ld   <- list(catalog = catalog, periods = periods, path = path)
+  max_date <- suppressWarnings(max(periods$date, na.rm = TRUE))
+  regions <- paste0("North East|North West|Yorkshire|East Midlands|West Midlands|",
+                    "East of England|London|South East|South West|\\bWales\\b|",
+                    "\\bScotland\\b|Northern Ireland")
+  recs <- list()
+  for (i in seq_len(nrow(catalog))) {
+    cdid <- catalog$cdid[i]
+    av <- .lms_avail_freqs(ld, cdid); if (length(av) == 0L) next
+    fr <- if ("M" %in% av) "M" else if ("Q" %in% av) "Q" else "A"
+    s <- lms_series(catalog, periods, path, cdid, fr)
+    if (is.null(s) || nrow(s) < min_obs) next
+    if (is.finite(max_date) && as.numeric(max_date - s$date[nrow(s)]) > recency_days) next
+    v <- s$value; n <- length(v); h <- yhz[[fr]]
+    if (n <= h + 6L) next
+    dy <- v[(h + 1L):n] - v[1:(n - h)]; dy <- dy[is.finite(dy)]
+    if (length(dy) < 8L) next
+    latest_dy <- v[n] - v[n - h]; if (!is.finite(latest_dy)) next
+    scale <- stats::mad(dy, constant = 1.4826)
+    if (!is.finite(scale) || scale < 1e-9) scale <- stats::sd(dy)
+    if (!is.finite(scale) || scale < 1e-9) next
+    z <- abs(latest_dy - stats::median(dy)) / scale
+    crow <- catalog[i, , drop = FALSE]; ttl <- crow$title
+    ctx <- .lms_context_clause(s, fr)
+    nseg <- if (grepl(": ", ttl, fixed = TRUE)) length(gregexpr(": ", ttl, fixed = TRUE)[[1]]) else 0L
+    penalty <- 0.35 * max(0L, nseg - 2L) +
+               1.2 * grepl(regions, ttl) +
+               0.6 * grepl("(: |\\b)(Male|Female|Men|Women)\\b", ttl)
+    score <- z + (if (nzchar(ctx)) 1.0 else 0) - penalty
+    is_rate <- .lms_is_rate(crow)
+    dir <- if (latest_dy > 0) "rose" else if (latest_dy < 0) "fell" else "was flat"
+    amt <- .lms_format_value(abs(latest_dy), is_rate); if (is_rate) amt <- paste0(amt, " pp")
+    headline <- sprintf("%s: %s %s on the year to %s (%.1fx its usual move%s)",
+                        ttl, dir, amt, s$period_label[n], z,
+                        if (nzchar(ctx)) paste0("; ", ctx) else "")
+    fkey <- if (!is.null(families) && !is.na(families$fam_of[cdid]))
+              paste0("F", families$fam_of[cdid]) else cdid
+    recs[[length(recs) + 1L]] <- data.frame(
+      cdid = cdid, title = ttl, freq = flab[[fr]], z = z, score = score,
+      dir = dir, headline = headline, fkey = fkey, stringsAsFactors = FALSE)
+  }
+  if (length(recs) == 0L) return(data.frame())
+  df <- do.call(rbind, recs)
+  df <- df[order(-df$score), , drop = FALSE]
+  df <- df[!duplicated(df$fkey), , drop = FALSE]
+  df$fkey <- NULL
+  utils::head(df, top_n)
+}

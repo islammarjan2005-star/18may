@@ -685,6 +685,22 @@ ui <- fluidPage(
                         plotOutput("charts_preview", height = "auto")
                     )
                 ),
+                div(class = "dashboard-card", id = "notable_signals_card",
+                    div(class = "dashboard-card__header", "Notable Signals"),
+                    div(class = "dashboard-card__content",
+                        conditionalPanel(
+                          condition = "output.lms_loaded == false",
+                          div(class = "govuk-hint",
+                              "Upload the LMS file to scan for the most unusual recent movements.")),
+                        conditionalPanel(
+                          condition = "output.lms_loaded == true",
+                          div(class = "govuk-hint", style = "margin-bottom:8px;",
+                              "Ranks the series whose latest year-on-year move is most unusual versus ",
+                              "their own history (one per breakdown family). Not a significance test - ",
+                              "the LMS file has no standard errors."),
+                          actionButton("lms_scan_signals", "Scan for notable signals",
+                                       class = "govuk-button govuk-button--blue", style = "width:100%;"),
+                          uiOutput("lms_signals_list")))),
                 div(class = "dashboard-card", id = "custom_indicators_card",
                     div(class = "dashboard-card__header", "Custom Indicators Preview"),
                     div(class = "dashboard-card__content",
@@ -2317,6 +2333,67 @@ server <- function(input, output, session) {
 
   output$lms_loaded <- reactive({ !is.null(lms_catalog_data()) })
   outputOptions(output, "lms_loaded", suspendWhenHidden = FALSE)
+
+  # ---- Notable signals: scan, rank, copy-in --------------------------------
+  lms_signals_data <- reactiveVal(NULL)
+
+  observeEvent(input$lms_scan_signals, {
+    cd <- lms_catalog_data()
+    if (is.null(cd)) { showNotification("Upload the LMS file first", type = "warning"); return() }
+    withProgress(message = "Scanning for notable signals...", value = 0.4, {
+      sig <- tryCatch(
+        lms_notable_signals(cd$catalog, cd$periods, cd$path, cd$families, top_n = 25L),
+        error = function(e) {
+          showNotification(paste("Scan error:", e$message), type = "error"); NULL
+        })
+      lms_signals_data(sig)
+    })
+  })
+
+  output$lms_signals_list <- renderUI({
+    sig <- lms_signals_data()
+    if (is.null(sig)) return(NULL)
+    if (nrow(sig) == 0L)
+      return(div(class = "govuk-hint", style = "margin-top:10px;", "No notable signals found."))
+    picks <- input$lms_pick
+    rows <- lapply(seq_len(nrow(sig)), function(i) {
+      cdid <- sig$cdid[i]
+      col  <- if (identical(sig$dir[i], "rose")) "#006100"
+              else if (identical(sig$dir[i], "fell")) "#9C0006" else "#505050"
+      div(style = "display:flex; align-items:flex-start; gap:10px; border-bottom:1px solid #eee; padding:7px 0;",
+          div(style = "flex:0 0 26px; font-weight:700; color:#1F4E79;", paste0(i, ".")),
+          div(style = "flex:1 1 auto; min-width:0;",
+              tags$span(style = paste0("color:", col, ";"), sig$headline[i])),
+          div(style = "flex:0 0 auto;",
+              if (cdid %in% picks) tags$em(style = "color:#006100;", "added")
+              else actionButton(paste0("lms_sig_add_", cdid), "Add",
+                                class = "govuk-button govuk-button--blue",
+                                style = "padding:2px 12px; margin:0;")))
+    })
+    div(style = "margin-top:10px;", do.call(tagList, rows))
+  })
+
+  # Register each signal's "Add" button once (per CDID), like the family-add path.
+  lms_sig_registered <- reactiveVal(character(0))
+  observeEvent(lms_signals_data(), {
+    sig <- lms_signals_data(); if (is.null(sig) || nrow(sig) == 0L) return()
+    reg <- lms_sig_registered(); new <- setdiff(sig$cdid, reg)
+    for (cdid in new) {
+      local({
+        cc <- cdid
+        observeEvent(input[[paste0("lms_sig_add_", cc)]], {
+          cdat <- lms_catalog_data(); if (is.null(cdat)) return()
+          ch <- setNames(cdat$catalog$cdid,
+                         paste0(cdat$catalog$cdid, " | ", cdat$catalog$title))
+          updateSelectizeInput(session, "lms_pick", choices = ch,
+                               selected = union(input$lms_pick, cc), server = TRUE)
+          showNotification(sprintf("Added %s to Custom Indicators.", cc),
+                           type = "message", duration = 2)
+        }, ignoreInit = TRUE)
+      })
+    }
+    if (length(new) > 0L) lms_sig_registered(c(reg, new))
+  })
 
   # Per-CDID settings rows. INVARIANT: all selected CDIDs render their own
   # input widgets here; row order follows input$lms_pick.
