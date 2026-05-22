@@ -663,6 +663,18 @@ ui <- fluidPage(
                         # up-front (visibility controlled by conditionalPanel) so preset
                         # buttons can call updateSelectInput on them even when collapsed.
                         uiOutput("chart_metric_rows"),
+                        # Chart any LMS series (same search as the explorer)
+                        conditionalPanel(
+                          condition = "output.lms_loaded == true",
+                          div(style = "border-top:2px solid #1F4E79; margin-top:16px; padding-top:12px;",
+                              tags$strong("Chart any LMS series"),
+                              div(class = "govuk-hint", style = "margin:2px 0 6px;",
+                                  "Search the uploaded LMS file and add any series as a native Word chart."),
+                              selectizeInput("chart_lms_pick", NULL,
+                                             choices = NULL, multiple = TRUE, width = "100%",
+                                             options = list(placeholder = "Type a CDID or title...",
+                                                            maxOptions = 25)),
+                              uiOutput("chart_lms_rows"))),
                         # Generate + preview
                         div(style = "margin-top:18px;",
                             actionButton("regenerate_charts", "Generate charts",
@@ -957,6 +969,9 @@ server <- function(input, output, session) {
           cat0 <- res$catalog
           choices <- setNames(cat0$cdid, paste0(cat0$cdid, " | ", cat0$title))
           updateSelectizeInput(session, "lms_pick",
+                               choices = choices, server = TRUE,
+                               selected = character(0))
+          updateSelectizeInput(session, "chart_lms_pick",
                                choices = choices, server = TRUE,
                                selected = character(0))
           fam_choices <- if (length(fams$families))
@@ -1818,7 +1833,8 @@ server <- function(input, output, session) {
               ids <- vapply(configs, `[[`, "", "id")
               append_key_charts_page(
                 file,
-                build_chart_series(configs, "auto", build_auto_sources(ids))
+                build_chart_series(configs, "auto",
+                                   c(build_auto_sources(ids), list(lms = lms_catalog_data())))
               )
             }
           }, error = function(e) message("Key Charts page skipped: ", e$message))
@@ -2136,6 +2152,47 @@ server <- function(input, output, session) {
     do.call(tagList, rows)
   })
 
+  # Config rows for LMS series added as charts (frequency + the usual controls).
+  output$chart_lms_rows <- renderUI({
+    cd <- lms_catalog_data(); picks <- input$chart_lms_pick
+    if (is.null(cd) || length(picks) == 0L) return(NULL)
+    cur_yr <- as.integer(format(Sys.Date(), "%Y")); yrs <- as.character(1971:cur_yr)
+    type_choices   <- c("Line" = "line", "Bar (column)" = "bar", "Area" = "area")
+    smooth_choices <- c("Raw" = "raw", "3-month rolling avg" = "rolling3",
+                        "12-month rolling avg" = "rolling12", "Annual average" = "annual")
+    rows <- lapply(picks, function(cdid) {
+      crow <- cd$catalog[cd$catalog$cdid == cdid, , drop = FALSE]
+      if (nrow(crow) == 0L) return(NULL)
+      avail <- .lms_avail_freqs(cd, cdid); if (length(avail) == 0L) avail <- c("M","Q","A")
+      freq_choices <- setNames(avail, c(M="Monthly", Q="Quarterly", A="Annual")[avail])
+      default_freq <- if ("Q" %in% avail) "Q" else avail[1]
+      sl <- tryCatch(lms_series(cd$catalog, cd$periods, cd$path, cdid, default_freq),
+                     error = function(e) NULL)
+      spark <- if (!is.null(sl) && nrow(sl) >= 2L) .lms_sparkline_svg(sl$value) else ""
+      div(style = "border-bottom:1px solid #e3e3e3; padding:8px 0;",
+          div(style = "display:flex; justify-content:space-between; align-items:flex-start; gap:10px;",
+              div(style = "flex:1 1 auto; min-width:0;", tags$strong(cdid), " | ", crow$title),
+              if (nzchar(spark)) div(style = "flex:0 0 auto;", HTML(spark))),
+          div(style = "display:flex; flex-wrap:wrap; gap:8px; padding-left:8px; margin-top:4px;",
+              div(style = "min-width:120px;",
+                  selectInput(paste0("chart_lms_", cdid, "_freq"), "Frequency",
+                              choices = freq_choices, selected = default_freq, width = "100%")),
+              div(style = "min-width:120px;",
+                  selectInput(paste0("chart_lms_", cdid, "_type"), "Type",
+                              choices = type_choices, selected = "line", width = "100%")),
+              div(style = "min-width:90px;",
+                  selectInput(paste0("chart_lms_", cdid, "_from"), "From",
+                              choices = yrs, selected = "2010", width = "100%")),
+              div(style = "min-width:90px;",
+                  selectInput(paste0("chart_lms_", cdid, "_to"), "To",
+                              choices = yrs, selected = as.character(cur_yr), width = "100%")),
+              div(style = "min-width:160px;",
+                  selectInput(paste0("chart_lms_", cdid, "_smoothing"), "Smoothing",
+                              choices = smooth_choices, selected = "raw", width = "100%"))))
+    })
+    do.call(tagList, Filter(Negate(is.null), rows))
+  })
+
   # Build the list of per-chart configs from the scoped inputs of every ticked metric.
   .build_chart_configs <- function() {
     configs <- list()
@@ -2147,6 +2204,18 @@ server <- function(input, output, session) {
         year_from = suppressWarnings(as.integer(input[[paste0("chart_", m$id, "_from")]])),
         year_to   = suppressWarnings(as.integer(input[[paste0("chart_", m$id, "_to")]])),
         smoothing = input[[paste0("chart_", m$id, "_smoothing")]] %||% "raw"
+      )
+    }
+    # LMS-series charts (added via the search box, src = "lms")
+    for (cdid in input$chart_lms_pick) {
+      fr <- input[[paste0("chart_lms_", cdid, "_freq")]]
+      if (is.null(fr) || !nzchar(fr)) next
+      configs[[length(configs) + 1]] <- list(
+        src       = "lms", id = cdid, cdid = cdid, freq = fr,
+        type      = input[[paste0("chart_lms_", cdid, "_type")]] %||% "line",
+        year_from = suppressWarnings(as.integer(input[[paste0("chart_lms_", cdid, "_from")]])),
+        year_to   = suppressWarnings(as.integer(input[[paste0("chart_lms_", cdid, "_to")]])),
+        smoothing = input[[paste0("chart_lms_", cdid, "_smoothing")]] %||% "raw"
       )
     }
     configs
@@ -2179,7 +2248,8 @@ server <- function(input, output, session) {
         series <- tryCatch(
           build_chart_series(configs, "manual",
                              list(file_a01 = uploaded_files$a01,
-                                  file_rtisa = uploaded_files$rtisa)),
+                                  file_rtisa = uploaded_files$rtisa,
+                                  lms = lms_catalog_data())),
           error = function(e) {
             showNotification(paste("Charts error:", e$message), type = "error"); NULL
           })
@@ -2197,7 +2267,8 @@ server <- function(input, output, session) {
         source("sheets/wages_nominal.R", local = FALSE)
         ids <- vapply(configs, `[[`, "", "id")
         series <- tryCatch(
-          build_chart_series(configs, "auto", build_auto_sources(ids)),
+          build_chart_series(configs, "auto",
+                             c(build_auto_sources(ids), list(lms = lms_catalog_data()))),
           error = function(e) {
             showNotification(paste("Charts error:", e$message), type = "error"); NULL
           })
@@ -2680,7 +2751,8 @@ server <- function(input, output, session) {
                   file,
                   build_chart_series(configs, "manual",
                                      list(file_a01 = uploaded_files$a01,
-                                          file_rtisa = uploaded_files$rtisa))
+                                          file_rtisa = uploaded_files$rtisa,
+                                          lms = lms_catalog_data()))
                 )
               }
             }, error = function(e) message("Key Charts page skipped: ", e$message))

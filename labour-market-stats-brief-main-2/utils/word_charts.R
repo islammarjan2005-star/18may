@@ -267,14 +267,44 @@ chart_metric_choices <- function() {
   }
 }
 
+# ---- LMS-series charts ------------------------------------------------------
+# An LMS chart config carries src="lms", cdid, freq. The data comes from the
+# in-memory LMS matrix via lms_series(); the chart is otherwise rendered like
+# any other (build_chart_xml is metric-agnostic). `lms` is the catalog list
+# (catalog, periods, path) passed in as sources$lms.
+.wc_lms_metric_def <- function(cfg, lms) {
+  if (is.null(lms) || is.null(lms$catalog)) return(NULL)
+  crow <- lms$catalog[lms$catalog$cdid == cfg$cdid, , drop = FALSE]
+  if (nrow(crow) == 0L) return(NULL)
+  is_rate <- .lms_is_rate(crow)
+  list(id = cfg$cdid, label = crow$title, type = "line", colour = "00285F",
+       unit = if (is_rate) "%" else .lms_unit_label(crow),
+       source = "ONS Labour Market Statistics (LMS)")
+}
+
+.wc_lms_extract <- function(cfg, lms) {
+  if (is.null(lms)) return(NULL)
+  s <- lms_series(lms$catalog, lms$periods, lms$path, cfg$cdid, cfg$freq)
+  if (is.null(s) || nrow(s) == 0L) return(NULL)
+  list(cat = s$period_label, val = s$value,
+       year = as.integer(format(s$date, "%Y")))
+}
+
 # Build a list of chart objects (one per selected metric), each clipped to the
 # [year_from, year_to] window. Metrics with no data yield an empty chart so the
 # preview can flag them; append_key_charts_page() drops those from the Word doc.
 build_chart_series <- function(chart_configs, flow, sources) {
   charts <- list()
   for (cfg in chart_configs) {
-    md <- .chart_metric_def(cfg$id)
-    if (is.null(md)) next
+    if (identical(cfg$src, "lms")) {
+      md <- .wc_lms_metric_def(cfg, sources$lms)
+      if (is.null(md)) next
+      s  <- tryCatch(.wc_lms_extract(cfg, sources$lms), error = function(e) NULL)
+    } else {
+      md <- .chart_metric_def(cfg$id)
+      if (is.null(md)) next
+      s  <- tryCatch(.wc_extract(cfg$id, flow, sources), error = function(e) NULL)
+    }
 
     sm_kind <- if (is.null(cfg$smoothing) || !nzchar(cfg$smoothing)) "raw" else cfg$smoothing
     suffix  <- switch(sm_kind,
@@ -292,7 +322,6 @@ build_chart_series <- function(chart_configs, flow, sources) {
       source = md$source
     )
 
-    s <- tryCatch(.wc_extract(cfg$id, flow, sources), error = function(e) NULL)
     if (is.null(s) || length(s$val) == 0) {
       charts[[length(charts) + 1]] <- c(base_chart, list(cat = character(0), val = numeric(0)))
       next
