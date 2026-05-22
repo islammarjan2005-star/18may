@@ -625,6 +625,24 @@ append_key_charts_page <- function(docx_path, charts) {
 }
 
 # ---- in-app preview (base graphics) -----------------------------------------
+
+# Draw the same value labels the Word chart shows, at the given x positions.
+.wc_preview_dlbls <- function(ch, xpos) {
+  d <- ch$dlbls
+  if (is.null(d) || length(d$items) == 0L) return(invisible())
+  col <- paste0("#", ch$colour)
+  fmt <- function(v) if (identical(d$numfmt, "0.0")) sprintf("%.1f", v)
+                     else formatC(round(v), format = "d", big.mark = ",")
+  for (it in d$items) {
+    r <- it$idx + 1L
+    if (r < 1L || r > length(ch$val) || is.na(ch$val[r])) next
+    pos <- switch(it$pos, r = 4, t = 3, b = 1,
+                  outEnd = if (ch$val[r] >= 0) 3 else 1, 3)
+    text(xpos[r], ch$val[r], fmt(ch$val[r]), pos = pos, offset = 0.4,
+         cex = 0.82, font = 2, col = col, xpd = NA)
+  }
+}
+
 .wc_draw_line <- function(ch, title) {
   y <- ch$val; x <- seq_along(y)
   plot(x, y, type = "n", xaxt = "n", xlab = "", ylab = ch$unit,
@@ -636,6 +654,7 @@ append_key_charts_page <- function(docx_path, charts) {
   chg <- which(c(TRUE, yr[-1] != yr[-length(yr)]))
   if (length(chg) > 8) chg <- chg[round(seq(1, length(chg), length.out = 8))]
   axis(1, at = x[chg], labels = yr[chg], cex.axis = 0.8)
+  .wc_preview_dlbls(ch, x)
   mtext(paste0("Source: ", ch$source), side = 1, line = 2.3, cex = 0.6, col = "grey50")
 }
 
@@ -649,6 +668,7 @@ append_key_charts_page <- function(docx_path, charts) {
   chg <- which(c(TRUE, yy[-1] != yy[-length(yy)]))
   if (length(chg) > 8) chg <- chg[round(seq(1, length(chg), length.out = 8))]
   axis(1, at = bp[chg], labels = paste0("'", yy[chg]), cex.axis = 0.8)
+  .wc_preview_dlbls(ch, as.vector(bp))
   mtext(paste0("Source: ", ch$source), side = 1, line = 2.3, cex = 0.6, col = "grey50")
 }
 
@@ -667,6 +687,7 @@ append_key_charts_page <- function(docx_path, charts) {
   chg <- which(c(TRUE, yr[-1] != yr[-length(yr)]))
   if (length(chg) > 8) chg <- chg[round(seq(1, length(chg), length.out = 8))]
   axis(1, at = x[chg], labels = yr[chg], cex.axis = 0.8)
+  .wc_preview_dlbls(ch, x)
   mtext(paste0("Source: ", ch$source), side = 1, line = 2.3, cex = 0.6, col = "grey50")
 }
 
