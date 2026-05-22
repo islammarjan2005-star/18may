@@ -897,13 +897,22 @@ lms_notable_signals <- function(catalog, periods, path, families = NULL,
     if (!is.finite(scale) || scale < 1e-9) next
     z <- abs(latest_dy - stats::median(dy)) / scale
     crow <- catalog[i, , drop = FALSE]; ttl <- crow$title
-    ctx <- .lms_context_clause(s, fr)
-    nseg <- if (grepl(": ", ttl, fixed = TRUE)) length(gregexpr(": ", ttl, fixed = TRUE)[[1]]) else 0L
-    penalty <- 0.35 * max(0L, nseg - 2L) +
-               1.2 * grepl(regions, ttl) +
-               0.6 * grepl("(: |\\b)(Male|Female|Men|Women)\\b", ttl)
-    score <- z + (if (nzchar(ctx)) 1.0 else 0) - penalty
     is_rate <- .lms_is_rate(crow)
+    ctx <- .lms_context_clause(s, fr)
+    # Extreme bonus: reward genuinely notable extremes - rate records / multi-year
+    # highs OR lows, and level *lows* (a fall to a multi-year low) - but NOT level
+    # highs, which just track population growth. Scaled by how far back the
+    # extreme reaches (years), capped so it boosts rather than dominates z.
+    cur <- v[n]; earlier <- v[1:(n - 1L)]
+    hi <- suppressWarnings(max(which(earlier >= cur)))
+    lo <- suppressWarnings(max(which(earlier <= cur)))
+    hi_yrs <- (if (is.finite(hi)) n - hi else n) / h
+    lo_yrs <- (if (is.finite(lo)) n - lo else n) / h
+    ex_bonus <- if (is_rate) { sp <- max(hi_yrs, lo_yrs); if (sp >= 1) min(sp, 10) * 0.3 else 0 }
+                else        { if (lo_yrs >= 1) min(lo_yrs, 10) * 0.25 else 0 }
+    penalty <- 1.2 * grepl(regions, ttl) +
+               0.6 * grepl("(: |\\b)(Male|Female|Men|Women)\\b", ttl)
+    score <- z + ex_bonus - penalty
     dir <- if (latest_dy > 0) "rose" else if (latest_dy < 0) "fell" else "was flat"
     amt <- .lms_format_value(abs(latest_dy), is_rate); if (is_rate) amt <- paste0(amt, " pp")
     headline <- sprintf("%s: %s %s on the year to %s (%.1fx its usual move%s)",
