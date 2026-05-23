@@ -556,10 +556,10 @@ ui <- fluidPage(
                                              actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_jump_charts", "Charts",
                                                           class = "govuk-button govuk-button--blue",
-                                                          onclick = "document.getElementById('charts_card').scrollIntoView({behavior:'smooth', block:'start'})"),
+                                                          onclick = "var d=document.getElementById('charts_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
                                              actionButton("manual_jump_custom", "Custom",
                                                           class = "govuk-button govuk-button--blue",
-                                                          onclick = "document.getElementById('custom_indicators_card').scrollIntoView({behavior:'smooth', block:'start'})"),
+                                                          onclick = "var d=document.getElementById('custom_indicators_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -610,10 +610,10 @@ ui <- fluidPage(
                                              actionButton("auto_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_jump_charts", "Charts",
                                                           class = "govuk-button govuk-button--blue",
-                                                          onclick = "document.getElementById('charts_card').scrollIntoView({behavior:'smooth', block:'start'})"),
+                                                          onclick = "var d=document.getElementById('charts_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
                                              actionButton("auto_jump_custom", "Custom",
                                                           class = "govuk-button govuk-button--blue",
-                                                          onclick = "document.getElementById('custom_indicators_card').scrollIntoView({behavior:'smooth', block:'start'})"),
+                                                          onclick = "var d=document.getElementById('custom_indicators_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
                                              
@@ -646,8 +646,8 @@ ui <- fluidPage(
                     div(class = "dashboard-card__header", "OECD International Comparisons"),
                     div(class = "dashboard-card__content preview-scroll", uiOutput("oecd_preview"))
                 ),
-                div(class = "dashboard-card", id = "charts_card",
-                    div(class = "dashboard-card__header", "Key Charts Preview"),
+                tags$details(class = "dashboard-card", id = "charts_card",
+                    tags$summary(class = "dashboard-card__header", style = "cursor:pointer;", "Key Charts Preview"),
                     div(class = "dashboard-card__content",
                         # Quick presets — apply From/To to every currently-ticked chart.
                         div(style = "margin-bottom:18px;",
@@ -685,8 +685,8 @@ ui <- fluidPage(
                         plotOutput("charts_preview", height = "auto")
                     )
                 ),
-                div(class = "dashboard-card", id = "notable_signals_card",
-                    div(class = "dashboard-card__header", "Notable Signals"),
+                tags$details(class = "dashboard-card", id = "notable_signals_card",
+                    tags$summary(class = "dashboard-card__header", style = "cursor:pointer;", "Notable Signals"),
                     div(class = "dashboard-card__content",
                         conditionalPanel(
                           condition = "output.lms_loaded == false",
@@ -708,8 +708,8 @@ ui <- fluidPage(
                               checkboxInput("lms_sig_scope",
                                             "Exclude regional & by-sex breakdowns", FALSE)),
                           uiOutput("lms_signals_list")))),
-                div(class = "dashboard-card", id = "custom_indicators_card",
-                    div(class = "dashboard-card__header", "Custom Indicators Preview"),
+                tags$details(class = "dashboard-card", id = "custom_indicators_card", open = "open",
+                    tags$summary(class = "dashboard-card__header", style = "cursor:pointer;", "Custom Indicators Preview"),
                     div(class = "dashboard-card__content",
                         conditionalPanel(
                           condition = "output.lms_loaded == false",
