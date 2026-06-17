@@ -3099,7 +3099,7 @@ server <- function(input, output, session) {
     
     header_row <- tags$tr(
       tags$th(style = header_style, ""),
-      tags$th(style = header_style, "Time period"),
+      tags$th(style = header_style, "Time period¹"),
       tags$th(style = header_style, "Unemployment rate (15+², %)"),
       tags$th(style = header_style, "Employment rate (15-64², %)"),
       tags$th(style = header_style, "Inactivity Rate (15-64², %)")
@@ -3120,6 +3120,8 @@ server <- function(input, output, session) {
     footnote_parts <- list(
       tags$em(paste0(
         "Source: OECD Infra-annual labour statistics. *Latest UK data from ONS Labour Force Survey. ",
+        "\u00b9Note: Included is the latest OECD data. Countries release labour market statistics on different schedules ",
+        "and so reference periods vary, with some outdated. Comparisons should be treated with caution. ",
         "\u00b2Age groups differ from OECD standard where UK data is used."
       ))
     )
