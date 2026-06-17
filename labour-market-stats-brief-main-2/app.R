@@ -487,33 +487,26 @@ ui <- fluidPage(
               )
   ),
   
-  div(class = "govuk-width-container govuk-width-container--wide",
-
+  div(class = "govuk-width-container",
+      
       div(class = "govuk-phase-banner",
           span(class = "govuk-tag", "BETA"),
           span("This is a new service.")
       ),
-
+      
       tags$main(class = "govuk-main-wrapper",
-
+                
                 h1(class = "govuk-heading-xl", "Labour Market Statistical Briefing Automation"),
-
-                # Two-column shell: setup/controls in a sticky left sidebar, previews on
-                # the right shown ONE AT A TIME via tabs (no more stacked wall of cards).
-                div(style = "display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap;",
-
-                    # ---- left: setup sidebar -------------------------------------
-                    div(style = paste0("flex:1 1 340px; max-width:430px; min-width:300px; ",
-                                       "position:sticky; top:12px; max-height:calc(100vh - 24px); ",
-                                       "overflow-y:auto; padding-right:2px;"),
-                        tabsetPanel(id = "mode_tabs", type = "pills", selected = "manual",
-
+                
+                # manual vs automatic mode tabs
+                tabsetPanel(id = "mode_tabs", type = "pills", selected = "manual",
+                            
                             # manual tab
                             tabPanel("Manual", value = "manual",
                                      div(class = "dashboard-card", style = "margin-top: 20px;",
                                          div(class = "dashboard-card__header", "Manual (Excel Upload)"),
                                          div(class = "dashboard-card__content",
-
+                                             
                                              div(class = "govuk-form-group",
                                                  tags$label(class = "govuk-label", style = "font-weight:700;", "Reference month"),
                                                  div(class = "govuk-hint", "Type the publication month (e.g. March 2026). Used for ONS download links."),
@@ -527,23 +520,23 @@ ui <- fluidPage(
                                                            value = "",
                                                            placeholder = "e.g. John Smith and Jane Doe", width = "280px")
                                              ),
-
+                                             
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              div(class = "govuk-hint", style = "font-size: 17px; line-height: 1.4;",
                                                  "Click a grey tag below to open its ONS download page. OECD data is fetched automatically."),
                                              uiOutput("oecd_auto_status"),
                                              uiOutput("upload_status"),
-
+                                             
                                              div(class = "govuk-form-group",
                                                  fileInput("upload_files", "Upload ONS Excel files",
                                                            accept = c(".xlsx", ".csv"), multiple = TRUE, width = "100%"),
                                                  div(class = "govuk-hint",
                                                      "Drag or select files. Auto-detected by name: A01, HR1, X09, RTISA, CLA01, X02, OECD.")
                                              ),
-
+                                             
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              h2(class = "govuk-heading-m", "Period selection"),
                                              div(class = "period-block",
                                                  tags$label(class = "govuk-label", style = "font-weight:700;", "Vacancies"),
@@ -553,35 +546,36 @@ ui <- fluidPage(
                                                  tags$label(class = "govuk-label", style = "font-weight:700;", "Payroll employees"),
                                                  uiOutput("manual_pay_period_buttons")
                                              ),
-
+                                             
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              h2(class = "govuk-heading-m", "Preview"),
-                                             div(class = "govuk-hint", "Each button builds its preview and opens that tab on the right."),
                                              actionButton("manual_preview_dashboard", "Dashboard", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
                                              actionButton("manual_jump_charts", "Charts",
-                                                          class = "govuk-button govuk-button--blue"),
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "var d=document.getElementById('charts_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
                                              actionButton("manual_jump_custom", "Custom",
-                                                          class = "govuk-button govuk-button--blue"),
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "var d=document.getElementById('custom_indicators_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              h2(class = "govuk-heading-m", "Download"),
                                              downloadButton("manual_download_word", "Download Word", class = "govuk-button govuk-button--blue"),
                                              downloadButton("manual_download_excel", "Download Excel", class = "govuk-button")
                                          )
                                      )
                             ),
-
+                            
                             # automatic tab
                             tabPanel("Automatic", value = "automatic",
                                      div(class = "dashboard-card", style = "margin-top: 20px;",
                                          div(class = "dashboard-card__header", "Automatic (Database)"),
                                          div(class = "dashboard-card__content",
-
+                                             
                                              div(class = "govuk-form-group",
                                                  tags$label(class = "govuk-label", style = "font-weight:700;", "Reference month"),
                                                  div(class = "govuk-hint", "Auto-detected from database. Edit to override."),
@@ -594,9 +588,9 @@ ui <- fluidPage(
                                                            value = "",
                                                            placeholder = "e.g. John Smith and Jane Doe", width = "280px")
                                              ),
-
+                                             
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              h2(class = "govuk-heading-m", "Period selection"),
                                              div(class = "period-block",
                                                  tags$label(class = "govuk-label", style = "font-weight:700;", "Vacancies"),
@@ -606,156 +600,151 @@ ui <- fluidPage(
                                                  tags$label(class = "govuk-label", style = "font-weight:700;", "Payroll employees"),
                                                  uiOutput("auto_pay_period_buttons")
                                              ),
-
+                                             
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              h2(class = "govuk-heading-m", "Preview"),
-                                             div(class = "govuk-hint", "Each button builds its preview and opens that tab on the right."),
                                              actionButton("preview_dashboard", "Dashboard", class = "govuk-button govuk-button--blue"),
                                              actionButton("preview_topten", "Top Ten", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_summary", "Summary", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_preview_oecd", "OECD", class = "govuk-button govuk-button--blue"),
                                              actionButton("auto_jump_charts", "Charts",
-                                                          class = "govuk-button govuk-button--blue"),
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "var d=document.getElementById('charts_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
                                              actionButton("auto_jump_custom", "Custom",
-                                                          class = "govuk-button govuk-button--blue"),
+                                                          class = "govuk-button govuk-button--blue",
+                                                          onclick = "var d=document.getElementById('custom_indicators_card');d.open=true;d.scrollIntoView({behavior:'smooth', block:'start'})"),
 
                                              tags$hr(class = "govuk-section-break"),
-
+                                             
                                              h2(class = "govuk-heading-m", "Download"),
                                              downloadButton("download_word", "Download Word", class = "govuk-button govuk-button--blue"),
                                              downloadButton("download_excel", "Download Excel", class = "govuk-button")
                                          )
                                      )
                             )
-                        )
-                    ),
-
-                    # ---- right: previews, one tab at a time ----------------------
-                    div(style = "flex:2 1 560px; min-width:0;",
-                        tabsetPanel(id = "preview_tabs", type = "pills", selected = "dashboard",
-
-                            tabPanel("Dashboard", value = "dashboard",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content preview-scroll", uiOutput("dashboard_preview")))),
-
-                            tabPanel("Top Ten", value = "topten",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content", uiOutput("topten_preview")))),
-
-                            tabPanel("Summary", value = "summary",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content", uiOutput("summary_preview")))),
-
-                            tabPanel("OECD", value = "oecd",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content preview-scroll", uiOutput("oecd_preview")))),
-
-                            tabPanel("Key Charts", value = "charts",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content",
-                                             # Quick presets — apply From/To to every currently-ticked chart.
-                                             div(style = "margin-bottom:18px;",
-                                                 tags$label(class = "govuk-label govuk-label--s", "Quick presets"),
-                                                 div(style = "display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;",
-                                                     actionButton("preset_last5",       "Last 5 years",  class = "govuk-button govuk-button--blue"),
-                                                     actionButton("preset_since_covid", "Since COVID",   class = "govuk-button govuk-button--blue"),
-                                                     actionButton("preset_since_2010",  "Since 2010",    class = "govuk-button govuk-button--blue"),
-                                                     actionButton("preset_full",        "Full history",  class = "govuk-button govuk-button--blue")),
-                                                 div(class = "govuk-hint", style = "margin-top:6px;",
-                                                     "Applies From/To to every chart currently ticked below.")),
-                                             # Per-metric rows. INVARIANT: every metric's inputs are rendered
-                                             # up-front (suspendWhenHidden = FALSE server-side) so preset
-                                             # buttons and the Word download see them even when this tab is hidden.
-                                             uiOutput("chart_metric_rows"),
-                                             # Chart any LMS series (same search as the explorer)
-                                             conditionalPanel(
-                                               condition = "output.lms_loaded == true",
-                                               div(style = "border-top:2px solid #1F4E79; margin-top:16px; padding-top:12px;",
-                                                   tags$strong("Chart any LMS series"),
-                                                   div(class = "govuk-hint", style = "margin:2px 0 6px;",
-                                                       "Search the uploaded LMS file and add any series as a native Word chart."),
-                                                   selectizeInput("chart_lms_pick", NULL,
-                                                                  choices = NULL, multiple = TRUE, width = "100%",
-                                                                  options = list(placeholder = "Type a CDID or title...",
-                                                                                 maxOptions = 25)),
-                                                   uiOutput("chart_lms_rows"))),
-                                             # Generate + preview
-                                             div(style = "margin-top:18px;",
-                                                 actionButton("regenerate_charts", "Generate charts",
-                                                              class = "govuk-button govuk-button--blue",
-                                                              style = "width:100%;"),
-                                                 div(class = "govuk-hint", style = "margin-top:10px;",
-                                                     "Click after changing any selection. The same charts are appended to the Word briefing.")),
-                                             plotOutput("charts_preview", height = "auto")
-                                         ))),
-
-                            tabPanel("Notable Signals", value = "signals",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content",
-                                             conditionalPanel(
-                                               condition = "output.lms_loaded == false",
-                                               div(class = "govuk-hint",
-                                                   "Upload the LMS file to scan for the most unusual recent movements.")),
-                                             conditionalPanel(
-                                               condition = "output.lms_loaded == true",
-                                               div(class = "govuk-hint", style = "margin-bottom:8px;",
-                                                   "Ranks the series whose latest year-on-year move is most unusual versus ",
-                                                   "their own history (one per breakdown family). Not a significance test - ",
-                                                   "the LMS file has no standard errors."),
-                                               actionButton("lms_scan_signals", "Scan for notable signals",
-                                                            class = "govuk-button govuk-button--blue", style = "width:100%;"),
-                                               div(style = "display:flex; flex-wrap:wrap; gap:18px; align-items:center; margin-top:10px;",
-                                                   radioButtons("lms_sig_sort", "Rank by",
-                                                                choices = c("Most unusual move (z-score)" = "unusual",
-                                                                            "At a record / multi-year extreme" = "extreme"),
-                                                                selected = "unusual", inline = TRUE),
-                                                   checkboxInput("lms_sig_scope",
-                                                                 "Exclude regional & by-sex breakdowns", FALSE)),
-                                               uiOutput("lms_signals_list"))
-                                         ))),
-
-                            tabPanel("Custom Indicators", value = "custom",
-                                     div(class = "dashboard-card", style = "margin-top:16px;",
-                                         div(class = "dashboard-card__content",
-                                             conditionalPanel(
-                                               condition = "output.lms_loaded == false",
-                                               div(class = "govuk-hint",
-                                                   "Upload the LMS bulk time-series file to enable. ",
-                                                   "Use the file upload on the left (any filename containing 'lms' is auto-detected).")),
-                                             conditionalPanel(
-                                               condition = "output.lms_loaded == true",
-                                               selectizeInput("lms_pick",
-                                                              "Add a series (search by CDID or title)",
-                                                              choices = NULL, multiple = TRUE, width = "100%",
-                                                              options = list(placeholder = "Type to search...",
-                                                                             maxOptions = 25)),
-                                               selectizeInput("lms_family_pick",
-                                                              "Or add a whole breakdown (search by metric, e.g. \"vacancies\")",
-                                                              choices = NULL, multiple = FALSE, width = "100%",
-                                                              options = list(placeholder = "Type a metric to find its breakdown families...",
-                                                                             maxOptions = 25)),
-                                               conditionalPanel(
-                                                 condition = "input.lms_pick && input.lms_pick.length > 0",
-                                                 div(style = "text-align:right; margin:-4px 0 6px;",
-                                                     actionLink("lms_clear", "Clear all selected series"))),
-                                               uiOutput("lms_settings_rows"),
-                                               div(style = "margin-top:18px;",
-                                                   actionButton("regenerate_custom", "Refresh preview",
-                                                                class = "govuk-button govuk-button--blue",
-                                                                style = "width:100%;"),
-                                                   div(class = "govuk-hint", style = "margin-top:10px;",
-                                                       "Click after changing any selection. These rows are appended to the Word briefing.")),
-                                               h3(class = "govuk-heading-s", style = "margin-top:18px;",
-                                                  "Table preview"),
-                                               uiOutput("lms_table_preview"),
-                                               h3(class = "govuk-heading-s", style = "margin-top:18px;",
-                                                  "Summary lines"),
-                                               uiOutput("lms_summary_preview"))
-                                         )))
-                        )
-                    )
                 )
+      )
+  ),
+  
+  # preview area
+  div(class = "govuk-width-container govuk-width-container--wide",
+      tags$main(class = "govuk-main-wrapper", style = "padding-top: 0;",
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "Dashboard Preview"),
+                    div(class = "dashboard-card__content preview-scroll", uiOutput("dashboard_preview"))
+                ),
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "Top Ten Statistics Preview"),
+                    div(class = "dashboard-card__content", uiOutput("topten_preview"))
+                ),
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "Summary Preview"),
+                    div(class = "dashboard-card__content", uiOutput("summary_preview"))
+                ),
+                div(class = "dashboard-card",
+                    div(class = "dashboard-card__header", "OECD International Comparisons"),
+                    div(class = "dashboard-card__content preview-scroll", uiOutput("oecd_preview"))
+                ),
+                tags$details(class = "dashboard-card", id = "charts_card",
+                    tags$summary(class = "dashboard-card__header", style = "cursor:pointer;", "Key Charts Preview"),
+                    div(class = "dashboard-card__content",
+                        # Quick presets — apply From/To to every currently-ticked chart.
+                        div(style = "margin-bottom:18px;",
+                            tags$label(class = "govuk-label govuk-label--s", "Quick presets"),
+                            div(style = "display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;",
+                                actionButton("preset_last5",       "Last 5 years",  class = "govuk-button govuk-button--blue"),
+                                actionButton("preset_since_covid", "Since COVID",   class = "govuk-button govuk-button--blue"),
+                                actionButton("preset_since_2010",  "Since 2010",    class = "govuk-button govuk-button--blue"),
+                                actionButton("preset_full",        "Full history",  class = "govuk-button govuk-button--blue")),
+                            div(class = "govuk-hint", style = "margin-top:6px;",
+                                "Applies From/To to every chart currently ticked below.")),
+                        # Per-metric rows. INVARIANT: every metric's inputs are rendered
+                        # up-front (visibility controlled by conditionalPanel) so preset
+                        # buttons can call updateSelectInput on them even when collapsed.
+                        uiOutput("chart_metric_rows"),
+                        # Chart any LMS series (same search as the explorer)
+                        conditionalPanel(
+                          condition = "output.lms_loaded == true",
+                          div(style = "border-top:2px solid #1F4E79; margin-top:16px; padding-top:12px;",
+                              tags$strong("Chart any LMS series"),
+                              div(class = "govuk-hint", style = "margin:2px 0 6px;",
+                                  "Search the uploaded LMS file and add any series as a native Word chart."),
+                              selectizeInput("chart_lms_pick", NULL,
+                                             choices = NULL, multiple = TRUE, width = "100%",
+                                             options = list(placeholder = "Type a CDID or title...",
+                                                            maxOptions = 25)),
+                              uiOutput("chart_lms_rows"))),
+                        # Generate + preview
+                        div(style = "margin-top:18px;",
+                            actionButton("regenerate_charts", "Generate charts",
+                                         class = "govuk-button govuk-button--blue",
+                                         style = "width:100%;"),
+                            div(class = "govuk-hint", style = "margin-top:10px;",
+                                "Click after changing any selection. The same charts are appended to the Word briefing.")),
+                        plotOutput("charts_preview", height = "auto")
+                    )
+                ),
+                tags$details(class = "dashboard-card", id = "notable_signals_card",
+                    tags$summary(class = "dashboard-card__header", style = "cursor:pointer;", "Notable Signals"),
+                    div(class = "dashboard-card__content",
+                        conditionalPanel(
+                          condition = "output.lms_loaded == false",
+                          div(class = "govuk-hint",
+                              "Upload the LMS file to scan for the most unusual recent movements.")),
+                        conditionalPanel(
+                          condition = "output.lms_loaded == true",
+                          div(class = "govuk-hint", style = "margin-bottom:8px;",
+                              "Ranks the series whose latest year-on-year move is most unusual versus ",
+                              "their own history (one per breakdown family). Not a significance test - ",
+                              "the LMS file has no standard errors."),
+                          actionButton("lms_scan_signals", "Scan for notable signals",
+                                       class = "govuk-button govuk-button--blue", style = "width:100%;"),
+                          div(style = "display:flex; flex-wrap:wrap; gap:18px; align-items:center; margin-top:10px;",
+                              radioButtons("lms_sig_sort", "Rank by",
+                                           choices = c("Most unusual move (z-score)" = "unusual",
+                                                       "At a record / multi-year extreme" = "extreme"),
+                                           selected = "unusual", inline = TRUE),
+                              checkboxInput("lms_sig_scope",
+                                            "Exclude regional & by-sex breakdowns", FALSE)),
+                          uiOutput("lms_signals_list")))),
+                tags$details(class = "dashboard-card", id = "custom_indicators_card", open = "open",
+                    tags$summary(class = "dashboard-card__header", style = "cursor:pointer;", "Custom Indicators Preview"),
+                    div(class = "dashboard-card__content",
+                        conditionalPanel(
+                          condition = "output.lms_loaded == false",
+                          div(class = "govuk-hint",
+                              "Upload the LMS bulk time-series file to enable. ",
+                              "Use the file upload above (any filename containing 'lms' is auto-detected).")),
+                        conditionalPanel(
+                          condition = "output.lms_loaded == true",
+                          selectizeInput("lms_pick",
+                                         "Add a series (search by CDID or title)",
+                                         choices = NULL, multiple = TRUE, width = "100%",
+                                         options = list(placeholder = "Type to search...",
+                                                        maxOptions = 25)),
+                          selectizeInput("lms_family_pick",
+                                         "Or add a whole breakdown (search by metric, e.g. \"vacancies\")",
+                                         choices = NULL, multiple = FALSE, width = "100%",
+                                         options = list(placeholder = "Type a metric to find its breakdown families...",
+                                                        maxOptions = 25)),
+                          conditionalPanel(
+                            condition = "input.lms_pick && input.lms_pick.length > 0",
+                            div(style = "text-align:right; margin:-4px 0 6px;",
+                                actionLink("lms_clear", "Clear all selected series"))),
+                          uiOutput("lms_settings_rows"),
+                          div(style = "margin-top:18px;",
+                              actionButton("regenerate_custom", "Refresh preview",
+                                           class = "govuk-button govuk-button--blue",
+                                           style = "width:100%;"),
+                              div(class = "govuk-hint", style = "margin-top:10px;",
+                                  "Click after changing any selection. These rows are appended to the Word briefing.")),
+                          h3(class = "govuk-heading-s", style = "margin-top:18px;",
+                             "Table preview"),
+                          uiOutput("lms_table_preview"),
+                          h3(class = "govuk-heading-s", style = "margin-top:18px;",
+                             "Summary lines"),
+                          uiOutput("lms_summary_preview"))))
       )
   ),
   
@@ -777,23 +766,6 @@ server <- function(input, output, session) {
   summary_path      <- "sheets/summary.R"
   top_ten_path      <- "sheets/top_ten_stats.R"
   template_path     <- "utils/ManualDB.docx"
-
-  # ---- preview-tab routing -------------------------------------------------
-  # Every sidebar preview/jump button also reveals its tab in the right-hand
-  # preview pane, so the result always appears where the user is looking.
-  .show_preview <- function(tab) updateTabsetPanel(session, "preview_tabs", selected = tab)
-  observeEvent(input$preview_dashboard,        .show_preview("dashboard"))
-  observeEvent(input$manual_preview_dashboard, .show_preview("dashboard"))
-  observeEvent(input$preview_topten,           .show_preview("topten"))
-  observeEvent(input$manual_preview_topten,    .show_preview("topten"))
-  observeEvent(input$auto_preview_summary,     .show_preview("summary"))
-  observeEvent(input$manual_preview_summary,   .show_preview("summary"))
-  observeEvent(input$auto_preview_oecd,        .show_preview("oecd"))
-  observeEvent(input$manual_preview_oecd,      .show_preview("oecd"))
-  observeEvent(input$auto_jump_charts,         .show_preview("charts"))
-  observeEvent(input$manual_jump_charts,       .show_preview("charts"))
-  observeEvent(input$auto_jump_custom,         .show_preview("custom"))
-  observeEvent(input$manual_jump_custom,       .show_preview("custom"))
   
   # a01 is the minimum required upload
   has_uploads <- function() {
@@ -2207,10 +2179,6 @@ server <- function(input, output, session) {
     do.call(tagList, rows)
   })
 
-  # Keep rendering even when the Key Charts tab is hidden: the Word/Excel
-  # downloads read these inputs, and presets update them, regardless of tab.
-  outputOptions(output, "chart_metric_rows", suspendWhenHidden = FALSE)
-
   # Config rows for LMS series added as charts (frequency + the usual controls).
   output$chart_lms_rows <- renderUI({
     cd <- lms_catalog_data(); picks <- input$chart_lms_pick
@@ -2255,8 +2223,6 @@ server <- function(input, output, session) {
     })
     do.call(tagList, Filter(Negate(is.null), rows))
   })
-
-  outputOptions(output, "chart_lms_rows", suspendWhenHidden = FALSE)
 
   # Build the list of per-chart configs from the scoped inputs of every ticked metric.
   .build_chart_configs <- function() {
@@ -2536,8 +2502,6 @@ server <- function(input, output, session) {
     })
     do.call(tagList, Filter(Negate(is.null), rows))
   })
-
-  outputOptions(output, "lms_settings_rows", suspendWhenHidden = FALSE)
 
   # Wire each per-series "Select all" baselines toggle. Observers are registered
   # once per CDID (tracked in lms_bl_all_registered) so re-picking a series does
@@ -3176,9 +3140,6 @@ server <- function(input, output, session) {
         checkboxInput(paste0("lms_line_", rec$cdid, "_", rec$baseline),
                       label = rec$text, value = TRUE)))
   })
-  # Word/Excel downloads read the lms_line_* checkboxes; keep them rendered
-  # even when the Custom Indicators tab is hidden.
-  outputOptions(output, "lms_summary_preview", suspendWhenHidden = FALSE)
 
   # render: oecd preview
   output$oecd_preview <- renderUI({
