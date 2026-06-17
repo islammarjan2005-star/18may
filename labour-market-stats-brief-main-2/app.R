@@ -524,8 +524,7 @@ ui <- fluidPage(
                                              tags$hr(class = "govuk-section-break"),
                                              
                                              div(class = "govuk-hint", style = "font-size: 17px; line-height: 1.4;",
-                                                 "Click a grey tag below to open its ONS download page. OECD data is fetched automatically."),
-                                             uiOutput("oecd_auto_status"),
+                                                 "Click a grey tag below to open its ONS (or OECD) download page, then upload the file. OECD is a manual upload like the others."),
                                              uiOutput("upload_status"),
                                              
                                              div(class = "govuk-form-group",
@@ -796,30 +795,14 @@ server <- function(input, output, session) {
     lms = NULL
   )
   
-  # oecd data auto-fetched from the oecd.* postgres tables (same source
-  # auto mode uses - see .fetch_oecd_table in the auto preview block).
-  # uploaded files still take precedence; see .oecd_source() resolver.
-  oecd_auto <- reactiveValues(
-    unemp_df = NULL,
-    emp_df = NULL,
-    inact_df = NULL,
-    fetched_at = NULL,
-    failed_any = FALSE
-  )
-  
-  # resolves a user-uploaded override path, else a pre-fetched data.frame
-  # (country/period/value). Downstream handlers accept either format.
+  # resolves the user-uploaded OECD file path. OECD is a manual upload like
+  # the other ONS sources - no automatic database fetch. Returns NULL until
+  # the matching file is uploaded.
   .oecd_source <- function(metric) {
-    uploaded <- switch(metric,
-                       unemp = uploaded_files$oecd_unemp,
-                       emp   = uploaded_files$oecd_emp,
-                       inact = uploaded_files$oecd_inact,
-                       NULL)
-    if (!is.null(uploaded)) return(uploaded)
     switch(metric,
-           unemp = oecd_auto$unemp_df,
-           emp   = oecd_auto$emp_df,
-           inact = oecd_auto$inact_df,
+           unemp = uploaded_files$oecd_unemp,
+           emp   = uploaded_files$oecd_emp,
+           inact = uploaded_files$oecd_inact,
            NULL)
   }
   
@@ -1031,47 +1014,6 @@ server <- function(input, output, session) {
     }
   })
   
-  # auto-fetch oecd from the postgres oecd.* tables once on session start.
-  # This is the same data source the Automatic tab uses, so as long as the
-  # DB is reachable the fetch cannot fail (no external HTTP dependency).
-  observe({
-    if (!is.null(oecd_auto$fetched_at)) return()  # already attempted
-    if (!exists("fetch_oecd_from_db", inherits = TRUE)) {
-      source("utils/helpers.R", local = FALSE)
-    }
-    withProgress(message = "Fetching OECD data from database\u2026", value = 0.1, {
-      res <- tryCatch(fetch_oecd_from_db(verbose = TRUE),
-                      error = function(e) list(unemp = NULL, emp = NULL, inact = NULL))
-      incProgress(0.9, detail = "done")
-      oecd_auto$unemp_df <- res$unemp
-      oecd_auto$emp_df   <- res$emp
-      oecd_auto$inact_df <- res$inact
-    })
-    oecd_auto$fetched_at <- Sys.time()
-    oecd_auto$failed_any <- is.null(oecd_auto$unemp_df) ||
-      is.null(oecd_auto$emp_df)   ||
-      is.null(oecd_auto$inact_df)
-  })
-  
-  # status banner: green tick with timestamp if ok, amber warning on partial/total failure
-  output$oecd_auto_status <- renderUI({
-    ts <- oecd_auto$fetched_at
-    if (is.null(ts)) {
-      return(div(class = "govuk-hint", style = "font-size: 16px;",
-                 "\u23F3 Fetching OECD data\u2026"))
-    }
-    stamp <- format(ts, "%H:%M")
-    if (isTRUE(oecd_auto$failed_any)) {
-      div(class = "govuk-inset-text", style = "border-left-color: #f47738; padding: 10px 14px; margin: 14px 0;",
-          tags$strong("OECD auto-fetch failed."),
-          " Upload the 3 OECD CSVs manually to override.")
-    } else {
-      div(class = "govuk-inset-text", style = "border-left-color: #00703c; padding: 10px 14px; margin: 14px 0;",
-          tags$strong("\u2713 OECD data auto-fetched"),
-          paste0(" at ", stamp, " \u2014 upload a CSV only to override."))
-    }
-  })
-  
   output$upload_status <- renderUI({
     all_files <- list(
       A01 = uploaded_files$a01, HR1 = uploaded_files$hr1,
@@ -1089,34 +1031,20 @@ server <- function(input, output, session) {
       RTISA = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/earningsandworkinghours/datasets/realtimeinformationstatisticsreferencetableseasonallyadjusted",
       CLA01 = "https://www.ons.gov.uk/employmentandlabourmarket/peoplenotinwork/outofworkbenefits/datasets/claimantcountcla01",
       X02   = "https://www.ons.gov.uk/employmentandlabourmarket/peopleinwork/employmentandemployeetypes/datasets/labourforcesurveyflowsestimatesx02",
-      OECD_UE    = "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7CEmployment%23JOB%23%7CUnemployment%20indicators%23JOB_UNEMP%23&fs[1]=Frequency%20of%20observation%2C0%7CQuarterly%23Q%23&fs[2]=Measure%2C0%7CUnemployment%23UNE%23&fs[3]=Measure%2C0%7CUnemployment%20rate%23UNE_LF%23&pg=0&fc=Measure&snb=1&vw=tb&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_LFS%40DF_IALFS_INDIC&df[ag]=OECD.SDD.TPS&df[vs]=1.0&dq=EA20%2BUSA%2BGBR%2BESP%2BJPN%2BITA%2BDEU%2BFRA%2BCAN.UNE_LF.PT_LF_SUB..Y._T.Y_GE15..Q&pd=2024-Q1%2C&to[TIME_PERIOD]=false",
-      OECD_EMP   = "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7CEmployment%23JOB%23%7CUnemployment%20indicators%23JOB_UNEMP%23&fs[1]=Frequency%20of%20observation%2C0%7CQuarterly%23Q%23&fs[2]=Measure%2C0%7CUnemployment%23UNE%23&fs[3]=Measure%2C0%7CUnemployment%20rate%23UNE_LF%23&pg=0&fc=Measure&snb=1&vw=tb&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_LFS%40DF_IALFS_INDIC&df[ag]=OECD.SDD.TPS&df[vs]=1.0&dq=EA20%2BUSA%2BGBR%2BESP%2BJPN%2BITA%2BDEU%2BFRA%2BCAN.EMP_WAP.PT_WAP_SUB..Y._T.Y15T64..Q&pd=2024-Q1%2C&to[TIME_PERIOD]=false",
-      OECD_INACT = "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7CEmployment%23JOB%23%7CUnemployment%20indicators%23JOB_UNEMP%23&fs[1]=Frequency%20of%20observation%2C0%7CQuarterly%23Q%23&fs[2]=Measure%2C0%7CUnemployment%23UNE%23&fs[3]=Measure%2C0%7CUnemployment%20rate%23UNE_LF%23&pg=0&fc=Measure&snb=1&vw=tb&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_LFS%40DF_IALFS_INDIC&df[ag]=OECD.SDD.TPS&df[vs]=1.0&dq=EA20%2BUSA%2BGBR%2BESP%2BJPN%2BITA%2BDEU%2BFRA%2BCAN.OLF_WAP.PT_WAP_SUB..Y._T.Y15T64..Q&pd=2024-Q1%2C&to[TIME_PERIOD]=false"
+      OECD_UE    = "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7CEmployment%23JOB%23%7CUnemployment%20indicators%23JOB_UNEMP%23&fs[1]=Frequency%20of%20observation%2C0%7CQuarterly%23Q%23&fs[2]=Measure%2C0%7CUnemployment%23UNE%23&fs[3]=Measure%2C0%7CUnemployment%20rate%23UNE_LF%23&pg=0&fc=Measure&snb=1&vw=tb&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_LFS%40DF_IALFS_INDIC&df[ag]=OECD.SDD.TPS&df[vs]=1.0&dq=EA%2BUSA%2BGBR%2BESP%2BJPN%2BITA%2BDEU%2BFRA%2BCAN.UNE_LF.PT_LF_SUB..Y._T.Y_GE15..Q&pd=2024-Q1%2C&to[TIME_PERIOD]=false",
+      OECD_EMP   = "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7CEmployment%23JOB%23%7CUnemployment%20indicators%23JOB_UNEMP%23&fs[1]=Frequency%20of%20observation%2C0%7CQuarterly%23Q%23&fs[2]=Measure%2C0%7CUnemployment%23UNE%23&fs[3]=Measure%2C0%7CUnemployment%20rate%23UNE_LF%23&pg=0&fc=Measure&snb=1&vw=tb&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_LFS%40DF_IALFS_INDIC&df[ag]=OECD.SDD.TPS&df[vs]=1.0&dq=EA%2BUSA%2BGBR%2BESP%2BJPN%2BITA%2BDEU%2BFRA%2BCAN.EMP_WAP.PT_WAP_SUB..Y._T.Y15T64..Q&pd=2024-Q1%2C&to[TIME_PERIOD]=false",
+      OECD_INACT = "https://data-explorer.oecd.org/vis?fs[0]=Topic%2C1%7CEmployment%23JOB%23%7CUnemployment%20indicators%23JOB_UNEMP%23&fs[1]=Frequency%20of%20observation%2C0%7CQuarterly%23Q%23&fs[2]=Measure%2C0%7CUnemployment%23UNE%23&fs[3]=Measure%2C0%7CUnemployment%20rate%23UNE_LF%23&pg=0&fc=Measure&snb=1&vw=tb&df[ds]=dsDisseminateFinalDMZ&df[id]=DSD_LFS%40DF_IALFS_INDIC&df[ag]=OECD.SDD.TPS&df[vs]=1.0&dq=EA%2BUSA%2BGBR%2BESP%2BJPN%2BITA%2BDEU%2BFRA%2BCAN.OLF_WAP.PT_WAP_SUB..Y._T.Y15T64..Q&pd=2024-Q1%2C&to[TIME_PERIOD]=false"
     )
     # map display names to url keys
     url_key_map <- c(A01 = "A01", HR1 = "HR1", RTISA = "RTISA", X09 = "X09",
                      CLA01 = "CLA01", X02 = "X02",
                      `OECD UE` = "OECD_UE", `OECD Emp` = "OECD_EMP", `OECD Inact` = "OECD_INACT")
-    # metric key for oecd auto-fetch lookup
-    oecd_metric_map <- c(`OECD UE` = "unemp", `OECD Emp` = "emp", `OECD Inact` = "inact")
     file_tags <- lapply(names(all_files), function(nm) {
       url_key <- url_key_map[[nm]]
-      metric <- oecd_metric_map[nm]
       if (!is.null(all_files[[nm]])) {
-        # manual override uploaded
+        # file uploaded
         span(class = "govuk-tag govuk-tag--green",
              paste0(nm, " \u2713"))
-      } else if (!is.na(metric)) {
-        # oecd tag: auto-fetched (blue) or failed fallback (orange), always linked to landing page
-        auto_df <- switch(metric,
-                          unemp = oecd_auto$unemp_df,
-                          emp   = oecd_auto$emp_df,
-                          inact = oecd_auto$inact_df, NULL)
-        tag_cls <- if (!is.null(auto_df)) "govuk-tag govuk-tag--blue" else "govuk-tag govuk-tag--orange"
-        label <- if (!is.null(auto_df)) paste0(nm, " \u2014 Auto") else paste0(nm, " \u2014 Fetch failed")
-        tags$a(href = landing[[url_key]], target = "_blank",
-               style = "text-decoration: none;",
-               span(class = tag_cls, style = "cursor: pointer;", label))
       } else if (!is.null(url_key) && url_key %in% names(landing)) {
         tags$a(href = landing[[url_key]], target = "_blank",
                style = "text-decoration: none;",
@@ -2746,7 +2674,7 @@ server <- function(input, output, session) {
     inact_src <- .oecd_source("inact")
     has_any <- !is.null(unemp_src) || !is.null(emp_src) || !is.null(inact_src)
     if (!has_any) {
-      showNotification("OECD data not available. Auto-fetch failed \u2014 upload the 3 OECD CSVs manually to override.", type = "warning")
+      showNotification("No OECD data uploaded \u2014 upload the 3 OECD files (UE, Emp, Inact) to populate international comparisons.", type = "warning")
       return()
     }
     
@@ -3171,7 +3099,7 @@ server <- function(input, output, session) {
     
     header_row <- tags$tr(
       tags$th(style = header_style, ""),
-      tags$th(style = header_style, "Time period¹"),
+      tags$th(style = header_style, "Time period"),
       tags$th(style = header_style, "Unemployment rate (15+², %)"),
       tags$th(style = header_style, "Employment rate (15-64², %)"),
       tags$th(style = header_style, "Inactivity Rate (15-64², %)")
@@ -3192,8 +3120,6 @@ server <- function(input, output, session) {
     footnote_parts <- list(
       tags$em(paste0(
         "Source: OECD Infra-annual labour statistics. *Latest UK data from ONS Labour Force Survey. ",
-        "\u00b9Note: Included is the latest OECD data. Countries release labour market statistics on different schedules ",
-        "and so reference periods vary, with some outdated. Comparisons should be treated with caution. ",
         "\u00b2Age groups differ from OECD standard where UK data is used."
       ))
     )
