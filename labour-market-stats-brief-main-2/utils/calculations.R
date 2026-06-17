@@ -173,6 +173,7 @@ wages_cpi_change_covid <- .safe(wages_cpi, "total", "dc")
 wages_cpi_change_election <- .safe(wages_cpi, "total", "de")
 wages_cpi_total_vs_dec2007 <- .safe(wages_cpi, "total", "pct_vs_dec2007")
 wages_cpi_total_vs_pandemic <- .safe(wages_cpi, "total", "pct_vs_pandemic")
+wages_cpi_total_qchange <- .safe(wages_cpi, "total", "qchange")
 
 # wages - cpi-adjusted regular
 latest_regular_cpi <- .safe(wages_cpi, "regular", "cur")
@@ -185,6 +186,7 @@ wages_cpi_reg_vs_pandemic <- .safe(wages_cpi, "regular", "pct_vs_pandemic")
 
 # days lost
 days_lost_cur <- .safe(days_lost, "cur")
+days_lost_2019_avg <- .safe(days_lost, "avg_2019")
 days_lost_label <- .safe_chr(days_lost, "label")
 
 # redundancy

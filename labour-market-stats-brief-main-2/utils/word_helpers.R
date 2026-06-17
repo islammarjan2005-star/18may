@@ -362,7 +362,7 @@ sv <- function(name, default = NA_real_) {
       }
     }
 
-    if (cc == "uk" && nzchar(tp)) tp <- paste0(tp, "*")
+    if (cc == "uk" && nzchar(tp)) tp <- "Latest ONS release*"
 
     doc <- replace_all(doc, paste0("qvzoecd", cc, "tp"), tp)
     doc <- replace_all(doc, paste0("qvzoecd", cc, "ur"), u_str)

@@ -71,6 +71,7 @@ generate_top_ten <- function() {
   retail_dy <- sv("retail_dy")
   health_dy <- sv("health_dy")
   days_lost_cur <- sv("days_lost_cur")
+  days_lost_2019_avg <- sv("days_lost_2019_avg")
   vac_dy <- sv("vac_dy")
   vac_cur <- sv("vac_cur")
   vac_dc <- sv("vac_dc")
@@ -102,12 +103,13 @@ generate_top_ten <- function() {
   line1 <- glue(
     'Annual growth in employees\' average earnings was {fmt_pct(latest_wages)} for total pay ',
     '(including bonuses) and {fmt_pct(latest_regular_cash)} for regular pay (excluding bonuses) ',
-    'in {lfs_period_label}. Public sector total pay growth of {fmt_pct(wages_total_public)} is ',
-    '{fmt_one_dec(abs(pub_priv_diff_total))}pp {pub_priv_dir_total} than the private sector, ',
-    'and regular pay growth of {fmt_pct(wages_reg_public)} is {fmt_one_dec(abs(pub_priv_diff_reg))}pp {pub_priv_dir_reg} than the private sector. ',
+    'in {lfs_period_label}. ',
     'Wage growth is {ifelse(is.na(wages_total_qchange) || wages_total_qchange < 0, "easing", "accelerating")}, with this representing a quarterly ',
     '{ifelse(is.na(wages_total_qchange) || wages_total_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_total_qchange))}pp ',
-    'and a quarterly {ifelse(is.na(wages_reg_qchange) || wages_reg_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_reg_qchange))}pp respectively.',
+    'and a quarterly {ifelse(is.na(wages_reg_qchange) || wages_reg_qchange >= 0, "increase", "decline")} of {fmt_one_dec(abs(wages_reg_qchange))}pp respectively. ',
+    'Public sector total pay growth of {fmt_pct(wages_total_public)} is ',
+    '{fmt_one_dec(abs(pub_priv_diff_total))}pp {pub_priv_dir_total} than the private sector, ',
+    'and regular pay growth of {fmt_pct(wages_reg_public)} is {fmt_one_dec(abs(pub_priv_diff_reg))}pp {pub_priv_dir_reg} than the private sector.',
     .comment = ""
   )
 
@@ -156,9 +158,9 @@ generate_top_ten <- function() {
 
   line5 <- glue(
     'The 16-64s economic inactivity rate was {fmt_rate(inact_rt_cur)}% ',
-    'in {lfs_period_label}, {fmt_dir(inact_rt_dy, "up", "down")} {fmt_pp(inact_rt_dy)} ',
-    'from a year ago, and {fmt_dir(inact_rt_dq, "up", "down")} {fmt_pp(inact_rt_dq)} ',
-    'from the previous quarter. The inactivity rate is ',
+    'in {lfs_period_label}, {fmt_dir(inact_rt_dq, "up", "down")} {fmt_pp(inact_rt_dq)} ',
+    'from the previous quarter, and {fmt_dir(inact_rt_dy, "up", "down")} {fmt_pp(inact_rt_dy)} ',
+    'from a year ago. The inactivity rate is ',
     '{fmt_pp(inact_rt_dc)} {inact_rt_covid_dir} than before the pandemic.',
     .comment = ""
   )
@@ -178,9 +180,17 @@ generate_top_ten <- function() {
     paste0("in ", days_lost_lbl, " ")
   } else ""
 
+  # contextualise against the 2019 (pre-pandemic, pre-strike-wave) monthly average
+  dl_2019_clause <- if (!is.na(days_lost_2019_avg) && !is.na(days_lost_cur)) {
+    dl_2019_dir <- if (days_lost_cur >= days_lost_2019_avg) "above" else "below"
+    paste0(' This is ', dl_2019_dir, ' the 2019 monthly average of ',
+           fmt_int_1k_top10(days_lost_2019_avg * 1000), ' working days lost.')
+  } else ""
+
   line7 <- glue(
     'There were an estimated {fmt_int_1k_top10(days_lost_cur * 1000)} ',
     'working days lost {days_lost_month}because of labour disputes across the UK.',
+    '{dl_2019_clause}',
     .comment = ""
   )
 

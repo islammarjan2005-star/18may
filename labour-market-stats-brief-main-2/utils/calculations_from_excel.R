@@ -263,6 +263,12 @@ run_calculations_from_excel <- function(manual_month = NULL,
     latest_wages_cpi   <- .val_by_date(cpi_months, cpi_total, cpi_anchor)
     latest_regular_cpi <- .val_by_date(cpi_months, cpi_reg, cpi_anchor)
 
+    # qoq movement in the yoy % real-growth figure (mirrors nominal wages qchange)
+    cpi_prev_q_total <- .val_by_date(cpi_months, cpi_total, cpi_anchor %m-% months(3))
+    wages_cpi_total_qchange <- if (!is.na(latest_wages_cpi) && !is.na(cpi_prev_q_total)) {
+      latest_wages_cpi - cpi_prev_q_total
+    } else NA_real_
+
     .cpi_change <- function(a_months, b_months) {
       a <- .avg_by_dates(cpi_months, cpi_real, a_months)
       b <- .avg_by_dates(cpi_months, cpi_real, b_months)
@@ -295,6 +301,7 @@ run_calculations_from_excel <- function(manual_month = NULL,
     latest_wages_cpi <- latest_regular_cpi <- NA_real_
     wages_cpi_change_q <- wages_cpi_change_y <- wages_cpi_change_covid <- wages_cpi_change_election <- NA_real_
     wages_cpi_total_vs_dec2007 <- wages_cpi_total_vs_pandemic <- NA_real_
+    wages_cpi_total_qchange <- NA_real_
   }
   
   assign("latest_wages_cpi",           latest_wages_cpi,           envir = target_env)
@@ -305,12 +312,13 @@ run_calculations_from_excel <- function(manual_month = NULL,
   assign("wages_cpi_change_election",  wages_cpi_change_election,  envir = target_env)
   assign("wages_cpi_total_vs_dec2007", wages_cpi_total_vs_dec2007, envir = target_env)
   assign("wages_cpi_total_vs_pandemic", wages_cpi_total_vs_pandemic, envir = target_env)
+  assign("wages_cpi_total_qchange",    wages_cpi_total_qchange,    envir = target_env)
   
   # a01 sheet 19: vacancies
   tbl_19 <- if (!is.null(file_a01)) .read_sheet(file_a01, "19") else data.frame()
 
   # override only comes from dashboard preview; otherwise we take the latest available
-  vac_lab_covid <- "Jan-Mar 2020"
+  vac_lab_covid <- "Dec-Feb 2020"
   vac_lab_elec  <- .lfs_label(ELEC24_DATE)
 
   if (nrow(tbl_19) > 0 && ncol(tbl_19) >= 3) {
@@ -382,13 +390,18 @@ run_calculations_from_excel <- function(manual_month = NULL,
       days_lost_cur <- NA_real_
       days_lost_label <- ""
     }
+    # 2019 monthly average, to contextualise the latest figure
+    idx_2019 <- valid_idx[format(dl_dates[valid_idx], "%Y") == "2019"]
+    days_lost_2019_avg <- if (length(idx_2019) > 0) mean(dl_vals[idx_2019]) else NA_real_
   } else {
     days_lost_cur <- NA_real_
     days_lost_label <- ""
+    days_lost_2019_avg <- NA_real_
   }
-  
-  assign("days_lost_cur",   days_lost_cur,   envir = target_env)
-  assign("days_lost_label", days_lost_label, envir = target_env)
+
+  assign("days_lost_cur",       days_lost_cur,       envir = target_env)
+  assign("days_lost_2019_avg",  days_lost_2019_avg,  envir = target_env)
+  assign("days_lost_label",     days_lost_label,     envir = target_env)
   
   
   rtisa_pay <- if (!is.null(file_rtisa)) {

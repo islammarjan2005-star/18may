@@ -80,6 +80,13 @@ compute_wages_cpi <- function(pg_data, manual_mm) {
   latest_total <- val_cpi_current(pg_data, make_datetime_label(anchor_m), CPI_CURRENT$TOTAL_EARNINGS_TYPE)
   latest_reg   <- val_cpi_current(pg_data, make_datetime_label(anchor_m), CPI_CURRENT$REG_EARNINGS_TYPE)
 
+  # qoq movement in the yoy % real-growth figure (mirrors nominal wages qchange)
+  prev_q_anchor <- anchor_m %m-% months(3)
+  total_qchange <- {
+    v2 <- val_cpi_current(pg_data, make_datetime_label(prev_q_anchor), CPI_CURRENT$TOTAL_EARNINGS_TYPE)
+    if (!is.na(latest_total) && !is.na(v2)) latest_total - v2 else NA_real_
+  }
+
   # annualised by multiplying weekly difference by 52
   calc_change <- function(dates_a, dates_b, earnings_type) {
     a <- get_cpi_raw_avg(pg_data, dates_a, earnings_type)
@@ -108,7 +115,8 @@ compute_wages_cpi <- function(pg_data, manual_mm) {
       dc              = calc_change(win3, covid3,    CPI_CHANGE$TOTAL_EARNINGS_TYPE),
       de              = calc_change(win3, election3, CPI_CHANGE$TOTAL_EARNINGS_TYPE),
       pct_vs_dec2007  = pct_above(cur_total_awe, dec2007_total),
-      pct_vs_pandemic = pct_above(cur_total_awe, pandemic_total)
+      pct_vs_pandemic = pct_above(cur_total_awe, pandemic_total),
+      qchange         = total_qchange
     ),
     regular = list(
       cur             = latest_reg,

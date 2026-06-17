@@ -17,5 +17,5 @@ ELEC24_DATE <- as.Date("2024-06-01")
 
 # matching lfs period labels for the baseline dates above
 COVID_LFS_LABEL <- "Dec-Feb 2020"
-COVID_VAC_LABEL <- "Jan-Mar 2020"
+COVID_VAC_LABEL <- "Dec-Feb 2020"
 ELECTION_LABEL  <- "Apr-Jun 2024"

@@ -617,7 +617,7 @@ create_audit_workbook <- function(
     vac_m$cur <- .cell_num(tbl_19, .find_row(tbl_19, lab_cur), 3)
     vac_m$dq  <- vac_m$cur - .cell_num(tbl_19, .find_row(tbl_19, .lfs_label(anchor_m %m-% months(3))), 3)
     vac_m$dy  <- vac_m$cur - .cell_num(tbl_19, .find_row(tbl_19, .lfs_label(anchor_m %m-% months(12))), 3)
-    vac_m$dc  <- vac_m$cur - .cell_num(tbl_19, .find_row(tbl_19, "Jan-Mar 2020"), 3)
+    vac_m$dc  <- vac_m$cur - .cell_num(tbl_19, .find_row(tbl_19, "Dec-Feb 2020"), 3)
     vac_m$de  <- vac_m$cur - .cell_num(tbl_19, .find_row(tbl_19, .lfs_label(ELEC24_DATE)), 3)
   }
   

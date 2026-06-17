@@ -2694,7 +2694,7 @@ server <- function(input, output, session) {
         if (length(stale) > 0) footnotes <<- c(footnotes, stale)
       }
       
-      if (country == "United Kingdom" && !is.na(tp)) tp <- paste0(tp, "*")
+      if (country == "United Kingdom" && !is.na(tp)) tp <- "Latest ONS release*"
       list(
         country = dname,
         period  = if (is.na(tp)) "\u2014" else tp,

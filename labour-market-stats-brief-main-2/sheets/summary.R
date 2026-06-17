@@ -286,12 +286,15 @@ generate_summary <- function() {
     wages_total_qchange <- if (exists("wages_total_qchange", inherits = TRUE)) safe_num(get("wages_total_qchange", inherits=TRUE)) else NA_real_
     wages_reg_qchange <- if (exists("wages_reg_qchange", inherits = TRUE)) safe_num(get("wages_reg_qchange", inherits=TRUE)) else NA_real_
     
+    wages_cpi_total_qchange <- if (exists("wages_cpi_total_qchange", inherits = TRUE)) safe_num(get("wages_cpi_total_qchange", inherits=TRUE)) else NA_real_
+
     wages_dir_total <- if (is.na(wages_total_qchange) || wages_total_qchange < 0) "fell" else "rose"
     wages_dir_reg <- if (is.na(wages_reg_qchange) || wages_reg_qchange < 0) "fell" else "rose"
     wages_dir_real <- if (is.na(latest_wages_cpi) || latest_wages_cpi < 0) "dropped" else "rose"
+    real_base <- if (!is.na(wages_cpi_total_qchange)) paste0(" (", fmt_signed_pp(wages_cpi_total_qchange), " from the previous 3-month period)") else ""
     line8 <- paste0(
       "Annual wage growth in average weekly earnings (inc. bonuses) ", wages_dir_total, " to ", fmt_pct(latest_wages), " in ", wages_lbl, " (", fmt_signed_pp(wages_total_qchange), " from the previous 3-month period). ",
-      "Wage growth excl. bonuses also ", wages_dir_reg, " to ", fmt_pct(latest_regular_cash), " (", fmt_signed_pp(wages_reg_qchange), "). Real wage growth (inc. bonuses) ", wages_dir_real, " to ", fmt_pct(latest_wages_cpi), "."
+      "Wage growth excl. bonuses also ", wages_dir_reg, " to ", fmt_pct(latest_regular_cash), " (", fmt_signed_pp(wages_reg_qchange), "). Real wage growth (inc. bonuses) ", wages_dir_real, " to ", fmt_pct(latest_wages_cpi), real_base, "."
     )
     
     # public vs private - highest growth sector goes first
