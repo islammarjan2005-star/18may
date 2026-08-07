@@ -22,7 +22,7 @@ The concept as written says "a study card appears inside your Instagram feed." T
 |---|---|---|
 | **A. Inject cards into the real Instagram app feed** | No. iOS gives no app the ability to draw inside another app. Android could via an AccessibilityService overlay, but it's a Play Store policy minefield and breaks on every Instagram release. Also a straightforward ToS violation. | ❌ Not a business |
 | **B. Browser extension for instagram.com / x.com / reddit.com** | Yes, genuinely — real injection into a real feed. But desktop web is a single-digit share of scroll time for students, and Meta throttles/obfuscates web DOM. | ✅ As a wedge and a demo, not as the product |
-| **C. Interstitial / toll-booth: intercept the *moment of opening* Instagram** | Yes, legitimately. iOS Screen Time (Family Controls + `ManagedSettings` shields) lets you gate an app and present your own UI first. Android has usage-access equivalents. | ✅ **Strongest shippable hook** |
+| **C. Interstitial / toll-booth: intercept the *moment of opening* Instagram** | Yes, legitimately. iOS Screen Time (Family Controls + `ManagedSettings` shields) lets you gate an app at launch. **Caveat: the shield is not a free-form canvas** — you control title, subtitle, icon and buttons, so the card itself lives one tap away in your app, then the user returns to Instagram. Android's usage-access overlay allows a richer in-place card. | ✅ **Strongest shippable hook** — but validate the app-switch tax in Phase 0 |
 | **D. Own the scroll: your own short-form feed, cards interleaved** | Yes, entirely yours. Hard part is supplying content worth scrolling. | ✅ **The long game** |
 | **E. Widgets, Lock Screen, Live Activities, keyboard, notification-inline answering** | Yes. Small surfaces, near-zero friction, no feed needed. | ✅ Cheap surface area, do it early |
 
@@ -296,6 +296,8 @@ Two commitments, made publicly and enforced in the metrics review:
 
 **Phase 0 — Prove the feeling (weeks 1–6).**
 Browser extension injecting cards into instagram.com and x.com, plus a TestFlight app with the doorway mode. No accounts, no sync, one hard-coded deck. The only question: *do people answer the cards, or do they resent them?* Ship it to 100 med students and watch skip rate. If skip rate is above ~60% after week one, the interruption isn't welcome and the whole thesis needs rework — better to learn that in week six than year two.
+
+Second question for Phase 0, equally decisive: **how much does the app-switch cost?** The iOS shield can't host the card in place, so measure answer rate for (a) the extension's true in-feed card versus (b) the shield → app → back-to-Instagram flow. If (b) collapses, the iOS strategy shifts weight onto widgets, notifications and the owned feed, and Android becomes the lead platform for the doorway.
 
 **Phase 1 — MVP (months 2–4).**
 iOS first. Doorway mode via Screen Time. Anki + Quizlet + CSV import. Three card types (basic, cloze, MCQ). Intensity dial. FSRS baseline scheduler. Home-screen widget. Weekly receipt. Free with a soft cap. **Goal: 20 retrievals/user/day, 40% week-4 retention.**
