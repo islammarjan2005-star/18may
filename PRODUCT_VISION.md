@@ -20,7 +20,7 @@ The concept as written says "a study card appears inside your Instagram feed." T
 
 | Approach | Can it exist? | Verdict |
 |---|---|---|
-| **A. Inject cards into the real Instagram app feed** | No. iOS gives no app the ability to draw inside another app. Android could via an AccessibilityService overlay, but it's a Play Store policy minefield and breaks on every Instagram release. Also a straightforward ToS violation. | ❌ Not a business |
+| **A. Inject cards into the real Instagram app feed** | **On Android, yes** — via an `AccessibilityService` overlay, the same mechanism the Reels-blockers ship today (§1.2). On iOS, no: no app can read or draw inside another app, full stop. Android-only, fragile, and a ToS violation either way. | ⚠️ Real, but not a foundation |
 | **B. Browser extension for instagram.com / x.com / reddit.com** | Yes, genuinely — real injection into a real feed. But desktop web is a single-digit share of scroll time for students, and Meta throttles/obfuscates web DOM. | ✅ As a wedge and a demo, not as the product |
 | **C. Interstitial / toll-booth: intercept the *moment of opening* Instagram** | Yes, legitimately, and via two different mechanisms — see §1.1. The **Shortcuts automation** route (what one sec, Clearspace and ScreenZen use) opens your app in full, giving you a complete interactive card. | ✅ **Strongest shippable hook** |
 | **D. Own the scroll: your own short-form feed, cards interleaved** | Yes, entirely yours. Hard part is supplying content worth scrolling. | ✅ **The long game** |
@@ -43,6 +43,24 @@ Three known costs of the Shortcuts route, all of which must be scoped into Phase
 3. **Browsers are not intercepted.** Safari → instagram.com bypasses it entirely. This is precisely the hole the extension (route B) fills.
 
 **What the category proves, and the warning inside it.** one sec's [PNAS field study](https://www.pnas.org/doi/abs/10.1073/pnas.2213114120) (280 users, six weeks) found ~36% of intercepted opens were abandoned and open attempts fell ~37% by week six. That validates the interception mechanic at scale — but note their goal is the *inverse* of ours: they want the user to turn back, we want them to answer and pass through. Encouraging, in that a 4-second card is far less adversarial than a forced breathing exercise. But it is also a hard warning: **friction measurably reduces app-opens**, so an annoying card erodes our own trigger surface. The intensity dial (§5) is therefore structural, not a preference. Track app-opens-per-day as a guardrail: if gating Instagram makes users open Instagram less, our own retrieval volume falls with it.
+
+### 1.2 What the Reels-blockers prove about route A
+
+A useful natural experiment: several shipping products block *only* Instagram Reels while leaving the rest of the app usable. How they do it defines the ceiling on route A.
+
+**Android — genuinely in-app.** [Scroll Break](https://play.google.com/store/apps/details?id=com.scrollbreak&hl=en_US), ScrollGuard and [Nudge](https://github.com/astraedus/nudge) all use the same pattern: an `AccessibilityService` subscribed to `TYPE_WINDOW_STATE_CHANGED` / `TYPE_VIEW_SCROLLED`, which confirms the foreground package is `com.instagram.android`, walks the node tree for a Reels signature (resource IDs like `clips_viewer_*`, tab selection state, content descriptions), and then draws a full-screen `TYPE_APPLICATION_OVERLAY` window. The same technique can detect the *main feed* and draw a card. **Route A is therefore real on Android.**
+
+Its four costs, which are why it can't be the foundation:
+1. **Detection breaks on nearly every Instagram release.** Anyone shipping this keeps detection signatures in remote config so a break is a server-side patch, not an app-store round trip. Non-negotiable if we build it.
+2. **Play Store policy.** `AccessibilityService` needs a declared and justified use; digital wellbeing clears review today, but we'd sit permanently in a sensitive-permission queue.
+3. **Battery and performance** of continuous node-tree walking.
+4. **Privacy.** We would be reading the user's private feed. Everything stays on-device, nothing is logged, and we say so loudly and verifiably — or we don't ship it.
+
+**iOS — nobody actually does it.** Every iOS "block only Reels" product is a workaround, not in-app blocking. The dominant trick is a Shortcuts automation that **redirects to a filtered web wrapper** of instagram.com with Reels stripped; others use a Safari extension (web only) or deep-link you to `instagram://direct-inbox` so you merely land somewhere other than the feed.
+
+**The temptation to refuse.** That web-wrapper trick is the one path where a card could genuinely appear between two real Instagram posts on an iPhone — we'd control the DOM. Reject it as a foundation: Meta's terms prohibit unauthorised clients, we'd be handling users' session or credentials, auth breaks constantly, and the wrapper feels worse than the native app — sacrificing the exact property (§3.1) the product cannot compromise. Note it, don't build on it.
+
+**Net effect on strategy:** iOS is unchanged — doorway plus our own feed. Android *may* later earn a true in-feed mode as a differentiated power feature, once the core product works and we can afford the maintenance burden. It is a Phase 3+ experiment, never the thing the company depends on.
 
 Be precise in your own language, always: the product is not *inside* Instagram. The product is **the same shape as Instagram**, and it sits **at the doorway to** Instagram. Users will not care about the distinction — as long as the feeling is identical. Guard the feeling obsessively.
 
@@ -330,7 +348,7 @@ iOS first. Doorway mode via Screen Time. Anki + Quizlet + CSV import. Three card
 Camera→cards AI generation (the demo that sells it). Osmo Feed with interleaving. Image occlusion and audio cards. Exam mode + the paywall. Desk mode. Android. Community decks by curriculum. **Goal: first £10k MRR; conversion ≥3%.**
 
 **Phase 3 — The moat (months 8–16).**
-Interruption-aware scheduler v1 on real data. Creator marketplace with rev share. Cohort/class decks and ambient social. Watch, Lock Screen, keyboard. Annual retention "Wrapped." Efficacy study kicked off. **Goal: 100k MAU, £100k MRR, one credible learning-outcome result.**
+Interruption-aware scheduler v1 on real data. Creator marketplace with rev share. Cohort/class decks and ambient social. Watch, Lock Screen, keyboard. Annual retention "Wrapped." Efficacy study kicked off. **Optional experiment:** true in-feed cards on Android via `AccessibilityService` (§1.2), behind a flag, with remote-config detection signatures from day one — only if the maintenance cost is affordable and the privacy commitment is watertight. **Goal: 100k MAU, £100k MRR, one credible learning-outcome result.**
 
 **Phase 4 — The category (year 2+).**
 Institutional and publisher deals. Non-student verticals (professional certs, corporate compliance done humanely, onboarding). Open the doorway to other feeds and other host habits — the mechanism generalises far beyond Instagram, and far beyond studying. The long-run framing:
