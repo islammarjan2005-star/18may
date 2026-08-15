@@ -22,13 +22,27 @@ The concept as written says "a study card appears inside your Instagram feed." T
 |---|---|---|
 | **A. Inject cards into the real Instagram app feed** | No. iOS gives no app the ability to draw inside another app. Android could via an AccessibilityService overlay, but it's a Play Store policy minefield and breaks on every Instagram release. Also a straightforward ToS violation. | ❌ Not a business |
 | **B. Browser extension for instagram.com / x.com / reddit.com** | Yes, genuinely — real injection into a real feed. But desktop web is a single-digit share of scroll time for students, and Meta throttles/obfuscates web DOM. | ✅ As a wedge and a demo, not as the product |
-| **C. Interstitial / toll-booth: intercept the *moment of opening* Instagram** | Yes, legitimately. iOS Screen Time (Family Controls + `ManagedSettings` shields) lets you gate an app at launch. **Caveat: the shield is not a free-form canvas** — you control title, subtitle, icon and buttons, so the card itself lives one tap away in your app, then the user returns to Instagram. Android's usage-access overlay allows a richer in-place card. | ✅ **Strongest shippable hook** — but validate the app-switch tax in Phase 0 |
+| **C. Interstitial / toll-booth: intercept the *moment of opening* Instagram** | Yes, legitimately, and via two different mechanisms — see §1.1. The **Shortcuts automation** route (what one sec, Clearspace and ScreenZen use) opens your app in full, giving you a complete interactive card. | ✅ **Strongest shippable hook** |
 | **D. Own the scroll: your own short-form feed, cards interleaved** | Yes, entirely yours. Hard part is supplying content worth scrolling. | ✅ **The long game** |
 | **E. Widgets, Lock Screen, Live Activities, keyboard, notification-inline answering** | Yes. Small surfaces, near-zero friction, no feed needed. | ✅ Cheap surface area, do it early |
 
 ### Recommendation: C → D, with B as marketing
 
 Ship **C** first (the toll booth), because it captures the exact psychological moment the concept is about — *the instant of habit initiation* — without needing a single line of content supply. Then build **D**, your own feed, because that is where the durable product and the margins live. Use **B**, the extension, as a viral demo: a screen recording of a flashcard appearing between two Instagram posts is the best marketing asset this company will ever have, and it costs a week to build.
+
+### 1.1 How the doorway is actually built (and what the wellbeing apps prove)
+
+There are two implementations, and the less obvious one is much better:
+
+- **Family Controls / `ManagedSettings` shield.** Blocks the app at launch, but the shield is *not* a free-form canvas — you control title, subtitle, icon and buttons only. The card would have to live one tap away.
+- **Shortcuts personal automation** — *"When Instagram is opened → run [our app]."* This is what [one sec](https://one-sec.app/setup/), Clearspace and ScreenZen actually use, and it **launches your app in full**, so the card can be a complete interactive screen. This is the route to build on.
+
+Three known costs of the Shortcuts route, all of which must be scoped into Phase 1:
+1. **The infinite-loop problem.** Deep-linking back to `instagram://` re-fires the automation and drags the user straight back into your app. The fix is to expose a custom App Intent to Shortcuts and hold state in a shared App Group — solved, but non-trivial.
+2. **Per-app setup in onboarding.** The user builds the automation by hand (guided). This is the single largest funnel drop in the wellbeing category and we inherit it. Invest in the guided flow accordingly, and default to gating *one* app, not five.
+3. **Browsers are not intercepted.** Safari → instagram.com bypasses it entirely. This is precisely the hole the extension (route B) fills.
+
+**What the category proves, and the warning inside it.** one sec's [PNAS field study](https://www.pnas.org/doi/abs/10.1073/pnas.2213114120) (280 users, six weeks) found ~36% of intercepted opens were abandoned and open attempts fell ~37% by week six. That validates the interception mechanic at scale — but note their goal is the *inverse* of ours: they want the user to turn back, we want them to answer and pass through. Encouraging, in that a 4-second card is far less adversarial than a forced breathing exercise. But it is also a hard warning: **friction measurably reduces app-opens**, so an annoying card erodes our own trigger surface. The intensity dial (§5) is therefore structural, not a preference. Track app-opens-per-day as a guardrail: if gating Instagram makes users open Instagram less, our own retrieval volume falls with it.
 
 Be precise in your own language, always: the product is not *inside* Instagram. The product is **the same shape as Instagram**, and it sits **at the doorway to** Instagram. Users will not care about the distinction — as long as the feeling is identical. Guard the feeling obsessively.
 
@@ -111,7 +125,17 @@ An unbroken run of effortful recall turns the feed into a test. Mix in cards tha
 - **Your own feed (Osmo Feed).** Cards interleaved at the user's chosen density into a scrollable feed of study-adjacent content: community cards, deck-mates' additions, meme cards, curated shorts.
 - **Ambient surfaces.** Home-screen widget (one card, tap to answer), Lock Screen widget, notification with inline answer buttons (answer without unlocking), Apple Watch complication, and — the sleeper hit — a **custom keyboard** that shows a card above the keys while you're typing anywhere.
 
-### 3.4 A day
+### 3.4 Feeling like a feed without owning any video
+
+We will never have a video library, and we don't need one. Three ways an app with no content of its own gets the scroll feeling:
+
+1. **Own the moment instead of the content.** The entire wellbeing category (one sec, Opal, ScreenZen, Clearspace, Jomo) runs a profitable subscription with a content library of exactly zero. That's route C, §1.1.
+2. **Make the unit itself scrollable.** X, Reddit, Pinterest, Tumblr and Substack Notes are all compulsive without video. The loop comes from *variable reward + infinite supply + near-zero cost per item* — video is one way to hit that bar, not a requirement. Cards, meme cards, explainer cards and deck-mate activity clear the same bar. **This is our feed.**
+3. **Borrow via official embeds.** YouTube IFrame player (Shorts included), TikTok Embed SDK / oEmbed, Reddit and RSS aggregation. Legal, but you must use their player, retain their branding, and not strip their ads — and some terms explicitly prohibit assembling autoplay feed surfaces from them. Acceptable as filler between cards; never a foundation, and never a dependency.
+
+Anything involving scraping Instagram or re-hosting other people's video is out of scope permanently — not worth the legal exposure or the takedown risk.
+
+### 3.5 A day
 
 > **07:52** — Alarm off, phone in hand, Instagram tapped by reflex. A card: *"Cross-price elasticity — sign for substitutes?"* Positive. Swipe right. Instagram opens. Elapsed: 3 seconds. He does not experience this as studying.
 >
@@ -297,7 +321,7 @@ Two commitments, made publicly and enforced in the metrics review:
 **Phase 0 — Prove the feeling (weeks 1–6).**
 Browser extension injecting cards into instagram.com and x.com, plus a TestFlight app with the doorway mode. No accounts, no sync, one hard-coded deck. The only question: *do people answer the cards, or do they resent them?* Ship it to 100 med students and watch skip rate. If skip rate is above ~60% after week one, the interruption isn't welcome and the whole thesis needs rework — better to learn that in week six than year two.
 
-Second question for Phase 0, equally decisive: **how much does the app-switch cost?** The iOS shield can't host the card in place, so measure answer rate for (a) the extension's true in-feed card versus (b) the shield → app → back-to-Instagram flow. If (b) collapses, the iOS strategy shifts weight onto widgets, notifications and the owned feed, and Android becomes the lead platform for the doorway.
+Second question for Phase 0, equally decisive: **what does the app-switch cost?** The Shortcuts doorway (§1.1) gives you a full card, but it still bounces the user out of Instagram and back. Measure answer rate for (a) the extension's true in-feed card versus (b) the automation → card → return flow. Watch the **automation setup completion rate** in onboarding at the same time — if fewer than half of installs finish it, the doorway is a leaky front door and weight shifts to widgets, notifications and the owned feed.
 
 **Phase 1 — MVP (months 2–4).**
 iOS first. Doorway mode via Screen Time. Anki + Quizlet + CSV import. Three card types (basic, cloze, MCQ). Intensity dial. FSRS baseline scheduler. Home-screen widget. Weekly receipt. Free with a soft cap. **Goal: 20 retrievals/user/day, 40% week-4 retention.**
